@@ -39,7 +39,6 @@ public:
             if (nullptr != pCriticalSection)
             {
                 EnterCriticalSection(pCriticalSection);
-
             }
             if (nullptr == instance)
             {
