@@ -1,57 +1,44 @@
-#ifndef IFW_FORMAT_HPP
-#define IFW_FORMAT_HPP
+#ifndef FORMAT_HPP_PNFK2EXVBOBKFYHHBIBEH3Z4
+#define FORMAT_HPP_PNFK2EXVBOBKFYHHBIBEH3Z4
 
 #include <string>
-#include <vector>
-#include <string.h>
-#include <stdarg.h>
+#include <cstring>
+#include <cstdarg>
+#include <cstdlib>
+#include <cstdint>
+#include <tchar.h>
 
 using namespace std;
 
-template <class T>
-inline void ToString(std::string & ret, T && val)
-{
-    ret.append(std::to_string(std::forward<T>(val)));
-}
-
-inline void ToString(std::string & ret, const std::string & val)
-{
-    ret.append(val);
-}
-
-inline void ToString(std::string & ret, const char * val)
-{
-    ret.append(val);
-}
-
-template <int N>
-struct SFormatN {
-    static std::string Format(const char * fmt)
-    {
-        static_assert(false, "");
-    }
-};
-
-template <>
-struct SFormatN<0> {
-    template <class ...ARGS>
-    static std::string Format(const char * fmt, const std::tuple<ARGS...> &)
-    {
-        return fmt;
-    }
-};
-
-template <class ...ARGS>
-string format(const char *tpl, ...) {
-// todo
-// https://github.com/mmc1993/sformat/blob/master/src/sformat.h
+inline unsigned long format(string &out, const TCHAR *tpl, ...) {
     va_list args;
     va_start(args, tpl);
-    va_arg(args, )
-//    for (int i = 0; i < count; i++) {
-//        printf("%d ", va_arg(args, int));
-//    }
+
+    TCHAR *buffer = nullptr;
+    size_t len = _tcslen(tpl);
+    size_t nWritten = 0;
+    do {
+        len = len << 1u;
+        void *p = buffer;
+        buffer = static_cast<TCHAR *>(realloc(p, len));
+        if (buffer == nullptr) {
+            buffer = static_cast<TCHAR *>(p);
+            goto __ERROR__;
+        }
+        nWritten = snprintf(buffer, len, tpl, args);
+    } while (nWritten >= len - 1);
+    out = string(buffer);
+    goto __FREE__;
+__ERROR__:
+    do {
+    } while (false);
+__FREE__:
+    if (buffer) {
+        free(buffer);
+        buffer = nullptr;
+    }
     va_end(args);
+    return nWritten;
 }
 
-#endif //IFW_FORMAT_HPP
+#endif //FORMAT_HPP_PNFK2EXVBOBKFYHHBIBEH3Z4
