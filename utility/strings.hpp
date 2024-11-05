@@ -1,0 +1,80 @@
+#ifndef STRINGS_HPP_PNFK2EXVBOBKFYHHBIBEH3Z4
+#define STRINGS_HPP_PNFK2EXVBOBKFYHHBIBEH3Z4
+
+#include <string>
+#include <cstring>
+#include <cstdarg>
+#include <cstdlib>
+#include <cstdint>
+#include <tchar.h>
+#include <vector>
+
+using namespace std;
+
+namespace strings {
+    inline unsigned long format(string &out, const TCHAR *tpl, ...) {
+        va_list args;
+        va_start(args, tpl);
+
+        TCHAR *buffer = nullptr;
+        size_t len = _tcslen(tpl);
+        size_t nWritten = 0;
+        do {
+            len = len << 1u;
+            void *p = buffer;
+            buffer = static_cast<TCHAR *>(realloc(p, len));
+            if (buffer == nullptr) {
+                buffer = static_cast<TCHAR *>(p);
+                goto __ERROR__;
+            }
+            nWritten = snprintf(buffer, len, tpl, args);
+        } while (nWritten >= len - 1);
+        out = string(buffer);
+        goto __FREE__;
+        __ERROR__:
+            do {
+            } while (false);
+        __FREE__:
+            if (buffer) {
+                free(buffer);
+                buffer = nullptr;
+            }
+        va_end(args);
+        return nWritten;
+    }
+
+    inline string format(const TCHAR *tpl, ...) {
+        string out{};
+        va_list args;
+        va_start(args, tpl);
+        format(out, tpl, args);
+        va_end(args);
+        return out;
+    }
+
+    inline string trim(const string& str) {
+        size_t first = str.find_first_not_of(" \t\n\r\f\v");
+        if (first == std::string::npos)
+            return ""; // 字符串全是空白字符
+
+        size_t last = str.find_last_not_of(" \t\n\r\f\v");
+        return str.substr(first, (last - first + 1));
+    }
+
+    inline vector<string> split(const string& str, const string& delim) {
+        std::vector<std::string> tokens;
+        size_t prev = 0, pos = 0;
+        do {
+            pos = str.find(delim, prev);
+            if (pos == std::string::npos) pos = str.length();
+            std::string token = str.substr(prev, pos-prev);
+            if (!token.empty()) tokens.push_back(token);
+            prev = pos + delim.length();
+        } while (pos < str.length() && prev < str.length());
+        return tokens;
+    }
+}
+
+
+
+#endif //STRINGS_HPP_PNFK2EXVBOBKFYHHBIBEH3Z4
