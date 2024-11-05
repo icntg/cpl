@@ -2,8 +2,6 @@
 #define BASE_7O35IAG3GPSZD6XSQPLM7KG2_H
 
 #include <cstdint>
-#include <cstdio>
-#include <cstdlib>
 #include <string>
 #include <windows.h>
 
