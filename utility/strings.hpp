@@ -73,8 +73,50 @@ namespace strings {
         } while (pos < str.length() && prev < str.length());
         return tokens;
     }
+
+    inline void upper(string& str) {
+        for (auto i = 0; i < str.length(); i++) {
+            auto ch = str[i];
+            if (ch <= 'z' && ch >= 'a') {
+                str[i] = static_cast<char>(ch - ('a' - 'A'));
+            }
+        }
+    }
+
+    inline void lower(string& str) {
+        for (auto i = 0; i < str.length(); i++) {
+            auto ch = str[i];
+            if (ch <= 'Z' && ch >= 'A') {
+                str[i] = static_cast<char>(ch + ('a' - 'A'));
+            }
+        }
+    }
+
+    inline bool endswith(const string& str, const string& suffix) {
+        if (suffix.length() > str.length()) {
+            return false;
+        }
+        for (auto i = 0; i < suffix.length(); i++) {
+            auto n = suffix.length() - 1 - i;
+            auto m = str.length() - 1 - i;
+            if (str[m] != suffix[n]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    inline bool startswith(const string& str, const string& prefix) {
+        if (prefix.length() > str.length()) {
+            return false;
+        }
+        for (auto i = 0; i < prefix.length(); i++) {
+            if (str[i] != prefix[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
 }
-
-
 
 #endif //STRINGS_HPP_PNFK2EXVBOBKFYHHBIBEH3Z4
