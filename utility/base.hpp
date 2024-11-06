@@ -1,5 +1,5 @@
-#ifndef BASE_7O35IAG3GPSZD6XSQPLM7KG2_H
-#define BASE_7O35IAG3GPSZD6XSQPLM7KG2_H
+#ifndef BASE_H_UNDERSCORE_EXEMPLARY_CONVERSATION_NEIGHBORHOOD_DOCUMENTATION_STRATEGY_ANALYSIS_EXEMPLARY
+#define BASE_H_UNDERSCORE_EXEMPLARY_CONVERSATION_NEIGHBORHOOD_DOCUMENTATION_STRATEGY_ANALYSIS_EXEMPLARY
 
 #include <cstdint>
 #include <string>
@@ -56,7 +56,7 @@ public:
      * 实际上该方法不需要调用。
      * 由系统回收资源即可。
      */
-    static void Destory()
+    static void Destroy()
     {
         auto& t = Instance();
         auto pcs = t._pcs;
@@ -109,4 +109,4 @@ public:
     virtual ~IContext() = default;
 };
 
-#endif //BASE_7O35IAG3GPSZD6XSQPLM7KG2_H
+#endif //BASE_H_UNDERSCORE_EXEMPLARY_CONVERSATION_NEIGHBORHOOD_DOCUMENTATION_STRATEGY_ANALYSIS_EXEMPLARY
