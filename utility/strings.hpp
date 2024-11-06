@@ -32,8 +32,8 @@ namespace strings {
         out = string(buffer);
         goto __FREE__;
         __ERROR__:
-            do {
-            } while (false);
+        {
+        }
         __FREE__:
             if (buffer) {
                 free(buffer);
@@ -72,6 +72,22 @@ namespace strings {
             prev = pos + delim.length();
         } while (pos < str.length() && prev < str.length());
         return tokens;
+    }
+
+    inline string join(const vector<string>& array, const string& delim) {
+        if (array.empty()) {
+            return "";
+        } else if (array.size() == 1) {
+            return array[0];
+        } else {
+            string buffer{};
+            for (auto& s : array) {
+                buffer += s;
+                buffer += delim;
+            }
+            auto n = buffer.length();
+            return buffer.substr(0, n - delim.length());
+        }
     }
 
     inline void upper(string& str) {
