@@ -22,30 +22,39 @@ public:
  */
 using namespace std;
 
-template <typename T>
-class Singleton
-{
-    T* _instance = nullptr;
+/**
+ * fclose等操作放在析构函数中会报错（isatty.cpp line 17 xxxx）
+ * 使用 load / unload 手动加载/卸载。
+ */
+class IContext {
+public:
+    virtual int32_t Load() = 0;
+
+    virtual int32_t Unload() = 0;
+
+    virtual ~IContext() = default;
+};
+
+template<typename T>
+class Singleton {
+    T *_instance = nullptr;
     PCRITICAL_SECTION _pcs = nullptr;
 public:
-    static T& Instance(const PCRITICAL_SECTION pCriticalSection = nullptr)
-    {
+    static T &Instance(
+            const PCRITICAL_SECTION pCriticalSection = nullptr
+    ) {
         // C++11实现方式自带锁，会导致不兼容XP
-        static T* instance = nullptr;
-        if (nullptr == instance)
-        {
-            if (nullptr != pCriticalSection)
-            {
+        static T *instance = nullptr;
+        if (nullptr == instance) {
+            if (nullptr != pCriticalSection) {
                 EnterCriticalSection(pCriticalSection);
             }
-            if (nullptr == instance)
-            {
+            if (nullptr == instance) {
                 instance = new T();
                 instance->_instance = instance; // 记录一下，释放时使用。
                 instance->_pcs = pCriticalSection; // 记录一下，释放时使用。
             }
-            if (nullptr != pCriticalSection)
-            {
+            if (nullptr != pCriticalSection) {
                 LeaveCriticalSection(pCriticalSection);
             }
         }
@@ -56,57 +65,102 @@ public:
      * 实际上该方法不需要调用。
      * 由系统回收资源即可。
      */
-    static void Destroy()
-    {
-        auto& t = Instance();
+    static void Destroy() {
+        auto &t = Instance();
         auto pcs = t._pcs;
-        if (nullptr != pcs)
-        {
+        if (nullptr != pcs) {
             EnterCriticalSection(pcs);
         }
-        if (nullptr != t._instance)
-        {
+        if (nullptr != t._instance) {
             delete t._instance;
         }
-        if (nullptr != pcs)
-        {
+        if (nullptr != pcs) {
             LeaveCriticalSection(pcs);
         }
         pcs = nullptr;
     }
 
-    explicit Singleton(T&&) = delete;
-    explicit Singleton(const T&) = delete;
-    Singleton& operator=(const T&) = delete;
+//    explicit Singleton(T &&) = delete;
+
+//    explicit Singleton(const T &) = delete;
+
+//    virtual Singleton &operator=(const T &) = delete;
 
 protected:
     Singleton() = default;
+
     virtual ~Singleton() = default;
 };
 
-
-class ISerialize
-{
+template<typename T>
+class ISingletonContext: public Singleton<T>, IContext {
+    T *_instance = nullptr;
+    PCRITICAL_SECTION _pcs = nullptr;
 public:
-    virtual std::string Serialize() =0;
-    virtual int32_t Deserialize(const std::string& s) =0;
+    static T &Instance(
+            const PCRITICAL_SECTION pCriticalSection = nullptr
+    ) {
+        // C++11实现方式自带锁，会导致不兼容XP
+        static T *instance = nullptr;
+        if (nullptr == instance) {
+            if (nullptr != pCriticalSection) {
+                EnterCriticalSection(pCriticalSection);
+            }
+            if (nullptr == instance) {
+                instance = new T();
+                instance->_pcs = pCriticalSection; // 记录一下，释放时使用。
+                instance->_instance = instance; // 记录一下，释放时使用。
+                instance->Load();
+            }
+            if (nullptr != pCriticalSection) {
+                LeaveCriticalSection(pCriticalSection);
+            }
+        }
+        return *instance;
+    }
+
+    /**
+     * 实际上该方法不需要调用。
+     * 由系统回收资源即可。
+     */
+    static void Destroy() {
+        auto &t = Instance();
+        auto pcs = t._pcs;
+        if (nullptr != pcs) {
+            EnterCriticalSection(pcs);
+        }
+        if (nullptr != t._instance) {
+            t._instance->Unload();
+            delete t._instance;
+        }
+        if (nullptr != pcs) {
+            LeaveCriticalSection(pcs);
+        }
+        pcs = nullptr;
+    }
+
+    explicit ISingletonContext(T &&) = delete;
+
+    explicit ISingletonContext(const T &) = delete;
+
+    ISingletonContext &operator=(const T &) = delete;
+
+protected:
+    ISingletonContext() = default;
+
+    ~ISingletonContext() override = default;
+};
+
+class ISerialize {
+public:
+    virtual std::string Serialize() = 0;
+
+    virtual int32_t Deserialize(const std::string &s) = 0;
+
     virtual ~ISerialize() = default;
 };
 
-class ISerializeJson : public ISerialize
-{
-};
-
-/**
- * fclose等操作放在析构函数中会报错（isatty.cpp line 17 xxxx）
- * 使用 load / unload 手动加载/卸载。
- */
-class IContext
-{
-public:
-    virtual int32_t Load() =0;
-    virtual int32_t Unload() =0;
-    virtual ~IContext() = default;
+class ISerializeJson : public ISerialize {
 };
 
 #endif //BASE_H_UNDERSCORE_EXEMPLARY_CONVERSATION_NEIGHBORHOOD_DOCUMENTATION_STRATEGY_ANALYSIS_EXEMPLARY
