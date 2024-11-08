@@ -12,7 +12,7 @@
 using namespace std;
 
 namespace strings {
-    inline unsigned long format(string &out, const TCHAR *tpl, ...) {
+    inline unsigned long Format(string &out, const TCHAR *tpl, ...) {
         va_list args;
         va_start(args, tpl);
 
@@ -43,16 +43,16 @@ namespace strings {
         return nWritten;
     }
 
-    inline string format(const TCHAR *tpl, ...) {
+    inline string Format(const TCHAR *tpl, ...) {
         string out{};
         va_list args;
         va_start(args, tpl);
-        format(out, tpl, args);
+        Format(out, tpl, args);
         va_end(args);
         return out;
     }
 
-    inline string trim(const string& str) {
+    inline string Trim(const string& str) {
         size_t first = str.find_first_not_of(" \t\n\r\f\v");
         if (first == std::string::npos)
             return ""; // 字符串全是空白字符
@@ -61,7 +61,7 @@ namespace strings {
         return str.substr(first, (last - first + 1));
     }
 
-    inline vector<string> split(const string& str, const string& delim) {
+    inline vector<string> Split(const string& str, const string& delim) {
         std::vector<std::string> tokens;
         size_t prev = 0, pos = 0;
         do {
@@ -74,7 +74,7 @@ namespace strings {
         return tokens;
     }
 
-    inline string join(const vector<string>& array, const string& delim) {
+    inline string Join(const vector<string>& array, const string& delim) {
         if (array.empty()) {
             return "";
         } else if (array.size() == 1) {
@@ -90,7 +90,7 @@ namespace strings {
         }
     }
 
-    inline void upper(string& str) {
+    inline void Upper(string& str) {
         for (auto i = 0; i < str.length(); i++) {
             auto ch = str[i];
             if (ch <= 'z' && ch >= 'a') {
@@ -99,7 +99,7 @@ namespace strings {
         }
     }
 
-    inline void lower(string& str) {
+    inline void Lower(string& str) {
         for (auto i = 0; i < str.length(); i++) {
             auto ch = str[i];
             if (ch <= 'Z' && ch >= 'A') {
@@ -108,7 +108,7 @@ namespace strings {
         }
     }
 
-    inline bool endswith(const string& str, const string& suffix) {
+    inline bool EndsWith(const string& str, const string& suffix) {
         if (suffix.length() > str.length()) {
             return false;
         }
@@ -122,7 +122,7 @@ namespace strings {
         return true;
     }
 
-    inline bool startswith(const string& str, const string& prefix) {
+    inline bool StartsWith(const string& str, const string& prefix) {
         if (prefix.length() > str.length()) {
             return false;
         }
@@ -132,6 +132,44 @@ namespace strings {
             }
         }
         return true;
+    }
+
+    inline string Hexlify(const string &s) {
+        static TCHAR HEX_TABLE[] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
+        string buffer;
+        for (const auto ch: s) {
+            buffer.push_back(HEX_TABLE[(ch >> 4) & 0x0f]);
+            buffer.push_back(HEX_TABLE[ch & 0x0f]);
+        }
+        return buffer;
+    }
+
+    inline TCHAR Upper(const TCHAR c) {
+        if (c >= _T('a') && c <= _T('z')) {
+            return static_cast<TCHAR>(c - (_T('a') - _T('A')));
+        }
+        return c;
+    }
+
+    inline TCHAR *StrInStr(const TCHAR *mainStr, const TCHAR *subStr) {
+        TCHAR *cp = nullptr;
+        memmove(&cp, &mainStr, sizeof(TCHAR *));
+        TCHAR *s1 = nullptr, *s2 = nullptr;
+        if (!*subStr) {
+            return cp;
+        }
+        while (*cp) {
+            s1 = cp;
+            memmove(&s2, &subStr, sizeof(TCHAR *));
+            while (*s1 && *s2 && Upper(*s1) == Upper(*s2)) {
+                s1++, s2++;
+            }
+            if (!*s2) {
+                return cp;
+            }
+            cp++;
+        }
+        return nullptr;
     }
 }
 
