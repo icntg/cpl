@@ -9,7 +9,7 @@ using namespace std;
 
 namespace net {
     namespace ipv4 {
-        inline int32_t IPStringToUINT32(const string &ip, uint32_t &out, const bool bigEndian) {
+        inline int32_t IPStringToUINT32(const string &ip, uint32_t &out, const bool bigEndian=true) {
             const size_t n = ip.length();
             size_t dotCnt = 0;
             uint64_t x = 0;

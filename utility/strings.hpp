@@ -27,13 +27,13 @@ namespace strings {
                 buffer = static_cast<TCHAR *>(p);
                 goto __ERROR__;
             }
-            nWritten = snprintf(buffer, len, tpl, args);
+            nWritten = vsnprintf(buffer, len, tpl, args);
         } while (nWritten >= len - 1);
         out = string(buffer);
         goto __FREE__;
+
         __ERROR__:
-        {
-        }
+        do{}while(false);
         __FREE__:
             if (buffer) {
                 free(buffer);
@@ -47,7 +47,29 @@ namespace strings {
         string out{};
         va_list args;
         va_start(args, tpl);
-        Format(out, tpl, args);
+        TCHAR *buffer = nullptr;
+        size_t len = _tcslen(tpl);
+        size_t nWritten = 0;
+        do {
+            len = len << 1u;
+            void *p = buffer;
+            buffer = static_cast<TCHAR *>(realloc(p, len));
+            if (buffer == nullptr) {
+                buffer = static_cast<TCHAR *>(p);
+                goto __ERROR__;
+            }
+            nWritten = vsnprintf(buffer, len, tpl, args);
+        } while (nWritten >= len - 1);
+        out = string(buffer);
+        goto __FREE__;
+
+        __ERROR__:
+        do{}while(false);
+        __FREE__:
+            if (buffer) {
+                free(buffer);
+                buffer = nullptr;
+            }
         va_end(args);
         return out;
     }
@@ -170,6 +192,40 @@ namespace strings {
             cp++;
         }
         return nullptr;
+    }
+
+    inline string FromWString(const wstring &s, const UINT CodePage = CP_ACP) {
+        string ret{};
+        const auto size = WideCharToMultiByte(CodePage, 0, s.data(), -1, nullptr, 0, nullptr, nullptr);
+        const auto buffer = new (nothrow) TCHAR[size];
+        if (nullptr == buffer) {
+            goto __ERROR__;
+        }
+        WideCharToMultiByte(CodePage, 0, s.data(), -1, buffer, size, nullptr, nullptr);
+        ret = string(buffer);
+        goto __FREE__;
+        __ERROR__:
+        do{}while(false);
+        __FREE__:
+        delete[] buffer;
+        return ret;
+    }
+
+    inline wstring FromString(const string &s, const UINT CodePage = CP_ACP) {
+        wstring ret{};
+        const auto size = MultiByteToWideChar(CodePage, 0, s.data(), -1, nullptr, 0);
+        const auto buffer = new (nothrow) wchar_t[size];
+        if (nullptr == buffer) {
+            goto __ERROR__;
+        }
+        MultiByteToWideChar(CodePage, 0, s.data(), -1, buffer, size);
+        ret = wstring(buffer);
+        goto __FREE__;
+        __ERROR__:
+        do{}while(false);
+        __FREE__:
+        delete[] buffer;
+        return ret;
     }
 }
 
