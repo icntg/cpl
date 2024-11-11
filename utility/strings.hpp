@@ -12,11 +12,8 @@
 using namespace std;
 
 namespace strings {
-    inline unsigned long Format(string &out, const TCHAR *tpl, ...) {
-        va_list args;
-        va_start(args, tpl);
-
-        TCHAR *buffer = nullptr;
+    inline size_t VFormat(string &out, const TCHAR *tpl, va_list ap) {
+        TCHAR *buffer{};
         size_t len = _tcslen(tpl);
         size_t nWritten = 0;
         do {
@@ -27,7 +24,7 @@ namespace strings {
                 buffer = static_cast<TCHAR *>(p);
                 goto __ERROR__;
             }
-            nWritten = vsnprintf(buffer, len, tpl, args);
+            nWritten = vsnprintf(buffer, len, tpl, ap);
         } while (nWritten >= len - 1);
         out = string(buffer);
         goto __FREE__;
@@ -39,6 +36,13 @@ namespace strings {
                 free(buffer);
                 buffer = nullptr;
             }
+        return nWritten;
+    }
+
+    inline size_t Format(string &out, const TCHAR *tpl, ...) {
+        va_list args;
+        va_start(args, tpl);
+        const auto nWritten = VFormat(out, tpl, args);
         va_end(args);
         return nWritten;
     }
@@ -47,39 +51,17 @@ namespace strings {
         string out{};
         va_list args;
         va_start(args, tpl);
-        TCHAR *buffer = nullptr;
-        size_t len = _tcslen(tpl);
-        size_t nWritten = 0;
-        do {
-            len = len << 1u;
-            void *p = buffer;
-            buffer = static_cast<TCHAR *>(realloc(p, len));
-            if (buffer == nullptr) {
-                buffer = static_cast<TCHAR *>(p);
-                goto __ERROR__;
-            }
-            nWritten = vsnprintf(buffer, len, tpl, args);
-        } while (nWritten >= len - 1);
-        out = string(buffer);
-        goto __FREE__;
-
-        __ERROR__:
-        do{}while(false);
-        __FREE__:
-            if (buffer) {
-                free(buffer);
-                buffer = nullptr;
-            }
+        VFormat(out, tpl, args);
         va_end(args);
         return out;
     }
 
     inline string Trim(const string& str) {
-        size_t first = str.find_first_not_of(" \t\n\r\f\v");
+        const size_t first = str.find_first_not_of(" \t\n\r\f\v");
         if (first == std::string::npos)
             return ""; // 字符串全是空白字符
 
-        size_t last = str.find_last_not_of(" \t\n\r\f\v");
+        const size_t last = str.find_last_not_of(" \t\n\r\f\v");
         return str.substr(first, (last - first + 1));
     }
 
@@ -123,7 +105,7 @@ namespace strings {
 
     inline void Lower(string& str) {
         for (auto i = 0; i < str.length(); i++) {
-            auto ch = str[i];
+            const auto ch = str[i];
             if (ch <= 'Z' && ch >= 'A') {
                 str[i] = static_cast<char>(ch + ('a' - 'A'));
             }
