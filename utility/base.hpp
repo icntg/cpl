@@ -22,6 +22,17 @@ public:
  */
 using namespace std;
 
+template<typename T>
+class ICritical {
+public:
+    virtual ~ICritical() = default;
+
+    virtual int32_t Enter() = 0;
+    virtual int32_t Leave() = 0;
+    virtual T GetValue() = 0;
+    virtual void SetValue(T value) = 0;
+};
+
 /**
  * fclose等操作放在析构函数中会报错（isatty.cpp line 17 xxxx）
  * 使用 load / unload 手动加载/卸载。
