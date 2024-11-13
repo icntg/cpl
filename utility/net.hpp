@@ -43,6 +43,12 @@ namespace net {
             return 0;
         }
 
+        inline uint32_t IPStringToUINT32(const string &ip, const bool bigEndian=true) {
+            uint32_t out{};
+            IPStringToUINT32(ip, out, bigEndian);
+            return out;
+        }
+
         inline int32_t UINT32ToIPString(const uint32_t d, string &out, const bool bigEndian = true) {
             out = "";
             uint8_t a[4]{};
@@ -77,6 +83,12 @@ namespace net {
             }
             out.push_back('\0');
             return 0;
+        }
+
+        inline string UINT32ToIPString(const uint32_t d, const bool bigEndian = true) {
+            string out{};
+            UINT32ToIPString(d, out, bigEndian);
+            return out;
         }
     }
 
