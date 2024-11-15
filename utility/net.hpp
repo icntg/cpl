@@ -17,7 +17,7 @@ namespace net {
             for (size_t i = 0; i <= n; i++) {
                 const char c = ip[i];
                 if (c == '.' || c == '\0') {
-                    dotCnt += 1;
+                    dotCnt++;
                     if (x >= 256) {
                         return -2;
                     }
@@ -28,10 +28,11 @@ namespace net {
                 } else {
                     return -1;
                 }
+                if (dotCnt > 4) {
+                    return -3;
+                }
             }
-            if (dotCnt != 4) {
-                return -3;
-            }
+
             if (bigEndian) {
                 out = t;
             } else {
@@ -89,6 +90,58 @@ namespace net {
             string out{};
             UINT32ToIPString(d, out, bigEndian);
             return out;
+        }
+
+        inline int32_t IPStringToArray(const string &ip, uint8_t out[4]) {
+            uint32_t x = 0;
+            const auto retCode = IPStringToUINT32(ip, x, true);
+            memmove(out, &x, sizeof(uint32_t));
+            return retCode;
+        }
+
+        inline int32_t IPStringToArray(const string &ip, char out[4]) {
+            uint32_t x = 0;
+            const auto retCode = IPStringToUINT32(ip, x, true);
+            memmove(out, &x, sizeof(uint32_t));
+            return retCode;
+        }
+
+        inline int32_t CalculateGateway(const uint32_t ip, const uint32_t mask, uint32_t &gateway) {
+            // check mask
+            int32_t n = 0;
+            bool z = true;
+            for (int32_t i = 0; i < 32; i++) {
+                const auto bit = (mask >> i) & 0x1;
+                if (bit && z) {
+                    n = 32 - i;
+                    z = false;
+                }
+                if (!z && !bit) {
+                    return -1;
+                }
+            }
+            if (n > 30) { // 网络地址空间不够。
+                return -1;
+            }
+            // 确保之后的数值都是1
+            const uint32_t broadcast = ip & mask | ~mask;
+            gateway = broadcast - 1;
+            return n;
+        }
+
+        inline int32_t CalculateGateway(const uint32_t ip, const uint8_t mask, uint32_t &gateway) {
+            // check mask
+            // if (mask > 32) {
+            if (mask > 30) { // 网络地址空间不够。
+                return -1;
+            }
+            constexpr uint32_t m = 0xffffffff;
+            const uint32_t n = 32 - mask;
+            const auto m32 = (m >> n) << n;
+
+            const uint32_t broadcast = ip & m32 | ~m32;
+            gateway = broadcast - 1;
+            return mask;
         }
     }
 
