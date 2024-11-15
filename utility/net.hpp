@@ -5,11 +5,13 @@
 #include <cstdbool>
 #include <string>
 
+#include "strings.hpp"
+
 using namespace std;
 
 namespace net {
     namespace ipv4 {
-        inline int32_t IPStringToUINT32(const string &ip, uint32_t &out, const bool bigEndian = true) {
+        inline int32_t IPStringToUINT32(const string &ip, uint32_t &out, const bool bigEndian = false) {
             const size_t n = ip.length();
             size_t dotCnt = 0;
             uint64_t x = 0;
@@ -44,13 +46,13 @@ namespace net {
             return 0;
         }
 
-        inline uint32_t IPStringToUINT32(const string &ip, const bool bigEndian = true) {
+        inline uint32_t IPStringToUINT32(const string &ip, const bool bigEndian = false) {
             uint32_t out{};
             IPStringToUINT32(ip, out, bigEndian);
             return out;
         }
 
-        inline int32_t UINT32ToIPString(const uint32_t d, string &out, const bool bigEndian = true) {
+        inline int32_t UINT32ToIPString(const uint32_t d, string &out, const bool bigEndian = false) {
             out = "";
             uint8_t a[4]{};
             if (bigEndian) {
@@ -82,26 +84,27 @@ namespace net {
                 }
                 out.push_back('.');
             }
-            out.push_back('\0');
+            out.pop_back();
+            // out.push_back('\0');
             return 0;
         }
 
-        inline string UINT32ToIPString(const uint32_t d, const bool bigEndian = true) {
+        inline string UINT32ToIPString(const uint32_t d, const bool bigEndian = false) {
             string out{};
             UINT32ToIPString(d, out, bigEndian);
             return out;
         }
 
-        inline int32_t IPStringToArray(const string &ip, uint8_t out[4]) {
+        inline int32_t IPStringToArray(const string &ip, uint8_t out[4], const bool bigEndian=false) {
             uint32_t x = 0;
-            const auto retCode = IPStringToUINT32(ip, x, true);
+            const auto retCode = IPStringToUINT32(ip, x, bigEndian);
             memmove(out, &x, sizeof(uint32_t));
             return retCode;
         }
 
-        inline int32_t IPStringToArray(const string &ip, char out[4]) {
+        inline int32_t IPStringToArray(const string &ip, char out[4], const bool bigEndian=false) {
             uint32_t x = 0;
-            const auto retCode = IPStringToUINT32(ip, x, true);
+            const auto retCode = IPStringToUINT32(ip, x, bigEndian);
             memmove(out, &x, sizeof(uint32_t));
             return retCode;
         }
@@ -262,9 +265,11 @@ namespace net {
 
         class IpForwardRow final : public base::serialize::ISerializeJson {
             const MIB_IPFORWARDROW *r{};
+            bool transferIPv4 = false;
         public:
-            explicit IpForwardRow(const MIB_IPFORWARDROW *r) {
+            explicit IpForwardRow(const MIB_IPFORWARDROW *r, const bool transferIPv4 = false) {
                 this->r = r;
+                this->transferIPv4 = transferIPv4;
             }
 
             string Serialize() override {
@@ -272,12 +277,24 @@ namespace net {
                 string s{};
                 s = strings::Format(R"("dwForwardDest":%lu)", r->dwForwardDest);
                 t.push_back(s);
+                if (transferIPv4) {
+                    s = strings::Format(R"("ForwardDest":"%s")", ipv4::UINT32ToIPString(r->dwForwardDest, false).data());
+                    t.push_back(s);
+                }
                 s = strings::Format(R"("dwForwardMask":%lu)", r->dwForwardMask);
                 t.push_back(s);
+                if (transferIPv4) {
+                    s = strings::Format(R"("ForwardMask":"%s")", ipv4::UINT32ToIPString(r->dwForwardMask, false).data());
+                    t.push_back(s);
+                }
                 s = strings::Format(R"("dwForwardPolicy":%lu)", r->dwForwardPolicy);
                 t.push_back(s);
                 s = strings::Format(R"("dwForwardNextHop":%lu)", r->dwForwardNextHop);
                 t.push_back(s);
+                if (transferIPv4) {
+                    s = strings::Format(R"("ForwardNextHop":"%s")", ipv4::UINT32ToIPString(r->dwForwardNextHop, false).data());
+                    t.push_back(s);
+                }
                 s = strings::Format(R"("dwForwardIfIndex":%lu)", r->dwForwardIfIndex);
                 t.push_back(s);
                 s = strings::Format(R"("dwForwardType|dwForwardProto":%lu)", r->dwForwardProto);
@@ -331,6 +348,105 @@ namespace net {
                 return ERROR_EMPTY;
             }
         };
+
+        inline int32_t EnumerateAdapters(const vector<base::callback::ICallback<PIP_ADAPTER_INFO> *> *callbacks) {
+            const auto &api = win32::API::Instance();
+            int32_t retCode = ERROR_SUCCESS;
+            static char $buffer$[128 * 1024]{};
+            static void *$pointer$ = $buffer$;
+            PIP_ADAPTER_INFO buffer{};
+            memmove(&buffer, &$pointer$, sizeof(PVOID));
+            bzero(buffer, sizeof($buffer$));
+
+            ULONG uRet{};
+            ULONG ulAdapterBufferSize = sizeof($buffer$);
+            uRet = api.IPv4.GetAdaptersInfo(buffer, &ulAdapterBufferSize);
+            if (ERROR_BUFFER_OVERFLOW == uRet) {
+                // 已有空间不够，需要重新申请。
+                buffer = static_cast<PIP_ADAPTER_INFO>(calloc(1, ulAdapterBufferSize));
+                if (!buffer) {
+                    retCode = ERROR_NOT_ENOUGH_MEMORY;
+                    goto __ERROR__;
+                }
+                uRet = api.IPv4.GetAdaptersInfo(buffer, &ulAdapterBufferSize);
+            }
+            if (ERROR_SUCCESS != uRet) {
+                log_error("[x] GetAdaptersInfo failed %s", FormatError(uRet).data());
+                retCode = static_cast<INT32>(uRet);
+                goto __ERROR__;
+            }
+            if (callbacks && !callbacks->empty()) {
+                for (PIP_ADAPTER_INFO adapter = buffer; adapter; adapter = adapter->Next) {
+                    bool continued = false;
+                    for (const auto &callback: *callbacks) {
+                        retCode |= callback->Callback(adapter);
+                        continued |= callback->ToBeContinued();
+                    }
+                    if (!continued) {
+                        break;
+                    }
+                }
+            }
+
+            goto __FREE__;
+            __ERROR__:
+            PASS;
+            __FREE__:
+            if (buffer != nullptr && 0 != memcmp(&buffer, &$pointer$, sizeof(PVOID))) {
+                free(buffer);
+            }
+            return retCode;
+        }
+
+        inline int32_t EnumerateRoutes(const vector<base::callback::ICallback<PMIB_IPFORWARDROW> *> *callbacks) {
+            const auto &api = win32::API::Instance();
+            int32_t retCode = ERROR_SUCCESS;
+            static char $buffer$[128 * 1024]{};
+            static const void *$pointer$ = $buffer$;
+            PMIB_IPFORWARDTABLE buffer{};
+            memmove(&buffer, &$pointer$, sizeof(PVOID));
+            bzero(buffer, sizeof($buffer$));
+
+            ULONG ulBufferSize = sizeof($buffer$);
+            DWORD dwRet{};
+
+            dwRet = api.IPv4.GetIpForwardTable(buffer, &ulBufferSize, TRUE);
+            if (ERROR_INSUFFICIENT_BUFFER == dwRet) {
+                buffer = static_cast<PMIB_IPFORWARDTABLE>(calloc(1, ulBufferSize));
+                if (!buffer) {
+                    retCode = ERROR_NOT_ENOUGH_MEMORY;
+                    goto __ERROR__;
+                }
+                dwRet = api.IPv4.GetIpForwardTable(buffer, &ulBufferSize, TRUE);
+            }
+            if (ERROR_SUCCESS != dwRet) {
+                log_error("[x] GetIpForwardTable failed %s", FormatError(dwRet).data());
+                retCode = static_cast<INT32>(dwRet);
+                goto __ERROR__;
+            }
+            if (callbacks && !callbacks->empty()) {
+                for (auto i = 0; i < buffer->dwNumEntries; i++) {
+                    const auto row = &buffer->table[i];
+                    bool continued = false;
+                    for (const auto &callback: *callbacks) {
+                        retCode |= callback->Callback(row);
+                        continued |= callback->ToBeContinued();
+                    }
+                    if (!continued) {
+                        break;
+                    }
+                }
+            }
+
+            goto __FREE__;
+            __ERROR__:
+            PASS;
+            __FREE__:
+            if (buffer != nullptr && 0 != memcmp(&buffer, &$pointer$, sizeof(PVOID))) {
+                free(buffer);
+            }
+            return retCode;
+        }
     }
 }
 
