@@ -209,6 +209,11 @@ namespace strings {
         delete[] buffer;
         return ret;
     }
+
+    inline string ReplaceAll(const string& str, const string& from, const string& to) {
+        vector<string> t = Split(str, from);
+        return Join(t, to);
+    }
 }
 
 #endif //STRINGS_HPP_PNFK2EXVBOBKFYHHBIBEH3Z4
