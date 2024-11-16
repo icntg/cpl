@@ -11,6 +11,15 @@ using namespace std;
 
 namespace net {
     namespace ipv4 {
+        inline uint32_t TransEndian(uint32_t v) {
+            uint32_t r{};
+            r |= (v & 0xff) << 24;
+            r |= (v & 0xff00) << 8;
+            r |= (v & 0xff0000) >> 8;
+            r |= (v & 0xff000000) >> 24;
+            return r;
+        }
+
         inline int32_t IPStringToUINT32(const string &ip, uint32_t &out, const bool bigEndian = false) {
             const size_t n = ip.length();
             size_t dotCnt = 0;
