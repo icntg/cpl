@@ -181,6 +181,30 @@ namespace net {
             gatewayBE = broadcast - 1;
             return 0;
         }
+
+        inline int32_t SplitAddressString(const string &address, uint32_t &hostBE, uint32_t &maskBE) {
+            const auto v = strings::Split(address, "/");
+            if (v.size() != 2) {
+                return -1;
+            }
+            const auto &v0 = v.at(0), &v1 = v.at(1);
+            const auto r00 = IPStringToUINT32(v0, hostBE, true);
+            if (r00 != 0) {
+                return -2;
+            }
+            const auto r01 = IPStringToUINT32(v1, maskBE, true);
+            if (r01 != 0) {
+                if (!strings::IsDigital(v1)) {
+                    return -3;
+                }
+                uint8_t byteMask = stoi(v1);
+                const auto r02 = net::ipv4::ByteMaskToUintMask(byteMask, maskBE, true);
+                if (r02 != 0) {
+                    return -4;
+                }
+            }
+            return 0;
+        }
     }
 
     namespace ipv6 {
