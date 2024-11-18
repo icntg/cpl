@@ -2,7 +2,6 @@
 #define NETWORK_H_JUSTICE_TREASURE_ADVANCE_STRONG_GLORIOUS_ENCHANTMENT_MAJESTIC
 
 #include <cstdint>
-#include <cstdbool>
 #include <string>
 
 #include "strings.hpp"
@@ -42,6 +41,9 @@ namespace net {
                 if (dotCnt > 4) {
                     return -3;
                 }
+            }
+            if (dotCnt != 4) {
+                return -4;
             }
 
             if (bigEndian) {
@@ -104,56 +106,80 @@ namespace net {
             return out;
         }
 
-        inline int32_t IPStringToArray(const string &ip, uint8_t out[4], const bool bigEndian=false) {
+        inline int32_t IPStringToArray(const string &ip, uint8_t out[4], const bool bigEndian = false) {
             uint32_t x = 0;
             const auto retCode = IPStringToUINT32(ip, x, bigEndian);
             memmove(out, &x, sizeof(uint32_t));
             return retCode;
         }
 
-        inline int32_t IPStringToArray(const string &ip, char out[4], const bool bigEndian=false) {
+        inline int32_t IPStringToArray(const string &ip, char out[4], const bool bigEndian = false) {
             uint32_t x = 0;
             const auto retCode = IPStringToUINT32(ip, x, bigEndian);
             memmove(out, &x, sizeof(uint32_t));
             return retCode;
         }
 
-        inline int32_t CalculateGateway(const uint32_t ip, const uint32_t mask, uint32_t &gateway) {
-            // check mask
-            int32_t n = 0;
-            bool z = true;
-            for (int32_t i = 0; i < 32; i++) {
-                const auto bit = (mask >> i) & 0x1;
-                if (bit && z) {
-                    n = 32 - i;
-                    z = false;
-                }
-                if (!z && !bit) {
-                    return -1;
-                }
-            }
-            if (n > 30) { // 网络地址空间不够。
-                return -1;
-            }
-            // 确保之后的数值都是1
-            const uint32_t broadcast = ip & mask | ~mask;
-            gateway = broadcast - 1;
-            return n;
-        }
-
-        inline int32_t CalculateGateway(const uint32_t ip, const uint8_t mask, uint32_t &gateway) {
-            // check mask
-            // if (mask > 32) {
-            if (mask > 30) { // 网络地址空间不够。
+        inline int32_t ByteMaskToUintMask(const uint8_t &byteMask, uint32_t &uintMask, const bool bigEndian = false) {
+            if (byteMask > 32) {
                 return -1;
             }
             constexpr uint32_t m = 0xffffffff;
-            const uint32_t n = 32 - mask;
-            const auto m32 = (m >> n) << n;
+            const uint32_t n = 32 - byteMask;
+            uintMask = (m >> n) << n;
+            if (!bigEndian) {
+                uintMask = TransEndian(uintMask);
+            }
+            return 0;
+        }
 
-            const uint32_t broadcast = ip & m32 | ~m32;
-            gateway = broadcast - 1;
-            return mask;
+        inline int32_t UintMaskToByteMask(const uint32_t &uintMaskBE, uint8_t &byteMask) {
+            int32_t n0 = 0;
+            for (auto i = 0; i < 32; i++) {
+                const auto bit = (uintMaskBE >> i) & 0x1;
+                if (bit) {
+                    n0 = i;
+                    break;
+                }
+            }
+            const auto n1 = 32 - n0;
+            for (auto i = n0; i < 32; i++) {
+                // 确保之后的数值都是1
+                const auto bit = (uintMaskBE >> i) & 0x1;
+                if (!bit) {
+                    return -1;
+                }
+            }
+            byteMask = n1;
+            return 0;
+        }
+
+        inline int32_t CalculateGateway(const uint32_t hostBE, const uint32_t uintMaskBE, uint32_t &gatewayBE) {
+            // check mask
+            uint8_t byteMask{};
+            const auto r00 = UintMaskToByteMask(uintMaskBE, byteMask);
+            if (r00 != 0) {
+                return r00;
+            }
+
+            const uint32_t broadcast = hostBE & uintMaskBE | ~uintMaskBE;
+            gatewayBE = broadcast - 1;
+            return 0;
+        }
+
+        inline int32_t CalculateGateway(const uint32_t hostBE, const uint8_t byteMask, uint32_t &gatewayBE) {
+            // check mask
+            // if (mask > 32) {
+            if (byteMask > 30) {
+                // 网络地址空间不够。
+                return -1;
+            }
+            uint32_t uintMaskBE{};
+            ByteMaskToUintMask(byteMask, uintMaskBE, true);
+
+            const uint32_t broadcast = hostBE & uintMaskBE | ~uintMaskBE;
+            gatewayBE = broadcast - 1;
+            return 0;
         }
     }
 
@@ -168,10 +194,10 @@ namespace net {
                 vector<string> a{};
                 for (auto p = pa; nullptr != p; p = p->Next) {
                     const auto s = strings::Format(
-                            R"("%s/%s$%lu")",
-                            strings::ReplaceAll(p->IpAddress.String, "\"", "\\\"").data(),
-                            strings::ReplaceAll(p->IpMask.String, "\"", "\\\"").data(),
-                            p->Context
+                        R"("%s/%s$%lu")",
+                        strings::ReplaceAll(p->IpAddress.String, "\"", "\\\"").data(),
+                        strings::ReplaceAll(p->IpMask.String, "\"", "\\\"").data(),
+                        p->Context
                     );
                     a.push_back(s);
                 }
@@ -208,10 +234,10 @@ namespace net {
                     s = R"("CurrentIpAddress":null)";
                 } else {
                     s = strings::Format(
-                            R"("CurrentIpAddress":"%s/%s$%lu")",
-                            strings::ReplaceAll(a->CurrentIpAddress->IpAddress.String, "\"", "\\\"").data(),
-                            strings::ReplaceAll(a->CurrentIpAddress->IpMask.String, "\"", "\\\"").data(),
-                            a->CurrentIpAddress->Context
+                        R"("CurrentIpAddress":"%s/%s$%lu")",
+                        strings::ReplaceAll(a->CurrentIpAddress->IpAddress.String, "\"", "\\\"").data(),
+                        strings::ReplaceAll(a->CurrentIpAddress->IpMask.String, "\"", "\\\"").data(),
+                        a->CurrentIpAddress->Context
                     );
                 }
                 t.push_back(s);
@@ -275,6 +301,7 @@ namespace net {
         class IpForwardRow final : public base::serialize::ISerializeJson {
             const MIB_IPFORWARDROW *r{};
             bool transferIPv4 = false;
+
         public:
             explicit IpForwardRow(const MIB_IPFORWARDROW *r, const bool transferIPv4 = false) {
                 this->r = r;
@@ -287,13 +314,15 @@ namespace net {
                 s = strings::Format(R"("dwForwardDest":%lu)", r->dwForwardDest);
                 t.push_back(s);
                 if (transferIPv4) {
-                    s = strings::Format(R"("ForwardDest":"%s")", ipv4::UINT32ToIPString(r->dwForwardDest, false).data());
+                    s = strings::Format(R"("ForwardDest":"%s")",
+                                        ipv4::UINT32ToIPString(r->dwForwardDest, false).data());
                     t.push_back(s);
                 }
                 s = strings::Format(R"("dwForwardMask":%lu)", r->dwForwardMask);
                 t.push_back(s);
                 if (transferIPv4) {
-                    s = strings::Format(R"("ForwardMask":"%s")", ipv4::UINT32ToIPString(r->dwForwardMask, false).data());
+                    s = strings::Format(R"("ForwardMask":"%s")",
+                                        ipv4::UINT32ToIPString(r->dwForwardMask, false).data());
                     t.push_back(s);
                 }
                 s = strings::Format(R"("dwForwardPolicy":%lu)", r->dwForwardPolicy);
@@ -301,14 +330,15 @@ namespace net {
                 s = strings::Format(R"("dwForwardNextHop":%lu)", r->dwForwardNextHop);
                 t.push_back(s);
                 if (transferIPv4) {
-                    s = strings::Format(R"("ForwardNextHop":"%s")", ipv4::UINT32ToIPString(r->dwForwardNextHop, false).data());
+                    s = strings::Format(R"("ForwardNextHop":"%s")",
+                                        ipv4::UINT32ToIPString(r->dwForwardNextHop, false).data());
                     t.push_back(s);
                 }
                 s = strings::Format(R"("dwForwardIfIndex":%lu)", r->dwForwardIfIndex);
                 t.push_back(s);
-                s = strings::Format(R"("dwForwardType|dwForwardProto":%lu)", r->dwForwardProto);
+                s = strings::Format(R"("dwForwardType":%lu)", r->dwForwardType);
                 t.push_back(s);
-                s = strings::Format(R"("ForwardType|ForwardProto":%lu)", r->ForwardProto);
+                s = strings::Format(R"("dwForwardProto":%lu)", r->dwForwardProto);
                 t.push_back(s);
                 s = strings::Format(R"("dwForwardAge":%lu)", r->dwForwardAge);
                 t.push_back(s);
@@ -336,8 +366,8 @@ namespace net {
         class IpForwardTable final : public base::serialize::ISerializeJson {
             const MIB_IPFORWARDTABLE *t{};
             vector<string> vr{};
-        public:
 
+        public:
             explicit IpForwardTable(const MIB_IPFORWARDTABLE *t) {
                 this->t = t;
             }
@@ -357,105 +387,6 @@ namespace net {
                 return ERROR_EMPTY;
             }
         };
-
-        inline int32_t EnumerateAdapters(const vector<base::callback::ICallback<PIP_ADAPTER_INFO> *> *callbacks) {
-            const auto &api = win32::API::Instance();
-            int32_t retCode = ERROR_SUCCESS;
-            static char $buffer$[128 * 1024]{};
-            static void *$pointer$ = $buffer$;
-            PIP_ADAPTER_INFO buffer{};
-            memmove(&buffer, &$pointer$, sizeof(PVOID));
-            bzero(buffer, sizeof($buffer$));
-
-            ULONG uRet{};
-            ULONG ulAdapterBufferSize = sizeof($buffer$);
-            uRet = api.IPv4.GetAdaptersInfo(buffer, &ulAdapterBufferSize);
-            if (ERROR_BUFFER_OVERFLOW == uRet) {
-                // 已有空间不够，需要重新申请。
-                buffer = static_cast<PIP_ADAPTER_INFO>(calloc(1, ulAdapterBufferSize));
-                if (!buffer) {
-                    retCode = ERROR_NOT_ENOUGH_MEMORY;
-                    goto __ERROR__;
-                }
-                uRet = api.IPv4.GetAdaptersInfo(buffer, &ulAdapterBufferSize);
-            }
-            if (ERROR_SUCCESS != uRet) {
-                log_error("[x] GetAdaptersInfo failed %s", FormatError(uRet).data());
-                retCode = static_cast<INT32>(uRet);
-                goto __ERROR__;
-            }
-            if (callbacks && !callbacks->empty()) {
-                for (PIP_ADAPTER_INFO adapter = buffer; adapter; adapter = adapter->Next) {
-                    bool continued = false;
-                    for (const auto &callback: *callbacks) {
-                        retCode |= callback->Callback(adapter);
-                        continued |= callback->ToBeContinued();
-                    }
-                    if (!continued) {
-                        break;
-                    }
-                }
-            }
-
-            goto __FREE__;
-            __ERROR__:
-            PASS;
-            __FREE__:
-            if (buffer != nullptr && 0 != memcmp(&buffer, &$pointer$, sizeof(PVOID))) {
-                free(buffer);
-            }
-            return retCode;
-        }
-
-        inline int32_t EnumerateRoutes(const vector<base::callback::ICallback<PMIB_IPFORWARDROW> *> *callbacks) {
-            const auto &api = win32::API::Instance();
-            int32_t retCode = ERROR_SUCCESS;
-            static char $buffer$[128 * 1024]{};
-            static const void *$pointer$ = $buffer$;
-            PMIB_IPFORWARDTABLE buffer{};
-            memmove(&buffer, &$pointer$, sizeof(PVOID));
-            bzero(buffer, sizeof($buffer$));
-
-            ULONG ulBufferSize = sizeof($buffer$);
-            DWORD dwRet{};
-
-            dwRet = api.IPv4.GetIpForwardTable(buffer, &ulBufferSize, TRUE);
-            if (ERROR_INSUFFICIENT_BUFFER == dwRet) {
-                buffer = static_cast<PMIB_IPFORWARDTABLE>(calloc(1, ulBufferSize));
-                if (!buffer) {
-                    retCode = ERROR_NOT_ENOUGH_MEMORY;
-                    goto __ERROR__;
-                }
-                dwRet = api.IPv4.GetIpForwardTable(buffer, &ulBufferSize, TRUE);
-            }
-            if (ERROR_SUCCESS != dwRet) {
-                log_error("[x] GetIpForwardTable failed %s", FormatError(dwRet).data());
-                retCode = static_cast<INT32>(dwRet);
-                goto __ERROR__;
-            }
-            if (callbacks && !callbacks->empty()) {
-                for (auto i = 0; i < buffer->dwNumEntries; i++) {
-                    const auto row = &buffer->table[i];
-                    bool continued = false;
-                    for (const auto &callback: *callbacks) {
-                        retCode |= callback->Callback(row);
-                        continued |= callback->ToBeContinued();
-                    }
-                    if (!continued) {
-                        break;
-                    }
-                }
-            }
-
-            goto __FREE__;
-            __ERROR__:
-            PASS;
-            __FREE__:
-            if (buffer != nullptr && 0 != memcmp(&buffer, &$pointer$, sizeof(PVOID))) {
-                free(buffer);
-            }
-            return retCode;
-        }
     }
 }
 

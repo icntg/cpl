@@ -1,11 +1,11 @@
 #ifndef STRINGS_HPP_PNFK2EXVBOBKFYHHBIBEH3Z4
 #define STRINGS_HPP_PNFK2EXVBOBKFYHHBIBEH3Z4
 
+#include <algorithm>
 #include <string>
 #include <cstring>
 #include <cstdarg>
 #include <cstdlib>
-#include <cstdint>
 #include <tchar.h>
 #include <vector>
 
@@ -146,6 +146,15 @@ namespace strings {
             buffer.push_back(HEX_TABLE[ch & 0x0f]);
         }
         return buffer;
+    }
+
+    inline bool IsDigital(const string &s) {
+        for (const auto ch: s) {
+            if (ch < _T('0') || ch > _T('9')) {
+                return false;
+            }
+        }
+        return true;
     }
 
     inline TCHAR Upper(const TCHAR c) {
