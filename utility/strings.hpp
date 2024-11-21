@@ -138,7 +138,7 @@ namespace strings {
         return true;
     }
 
-    inline string Hexlify(const string &s) {
+    inline string Hex(const string &s) {
         static TCHAR HEX_TABLE[] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
         string buffer;
         for (const auto ch: s) {
@@ -146,6 +146,45 @@ namespace strings {
             buffer.push_back(HEX_TABLE[ch & 0x0f]);
         }
         return buffer;
+    }
+
+    inline int32_t Unhex(const string &hex, string &out) {
+        if (hex.length() % 2 != 0) {
+            return -1;
+        }
+        out.reserve(hex.length() / 2 + 2);
+        for (auto i = 0; i < hex.length(); i+=2) {
+            const auto ch0 = hex[i];
+            const auto ch1 = hex[i + 1];
+            char bh{}, bl{};
+            if (ch0 >= '0' && ch0 <= '9') {
+                bh = static_cast<char>(ch0 - '0');
+            } else if (ch0 >= 'A' && ch0 <= 'F') {
+                bh = static_cast<char>(ch0 - 'A' + 10);
+            } else if (ch0 >= 'a' && ch0 <= 'f') {
+                bh = static_cast<char>(ch0 - 'a' + 10);
+            } else {
+                return i;
+            }
+            if (ch1 >= '0' && ch1 <= '9') {
+                bl = static_cast<char>(ch1 - '0');
+            } else if (ch1 >= 'A' && ch1 <= 'F') {
+                bl = static_cast<char>(ch1 - 'A' + 10);
+            } else if (ch1 >= 'a' && ch1 <= 'f') {
+                bl = static_cast<char>(ch1 - 'a' + 10);
+            } else {
+                return i + 1;
+            }
+            const auto ch = static_cast<char>((bh << 4) | bl);
+            out.push_back(ch);
+        }
+        return 0;
+    }
+
+    inline string Unhex(const string &hex) {
+        string out{};
+        Unhex(hex, out);
+        return out;
     }
 
     inline bool IsDigital(const string &s) {

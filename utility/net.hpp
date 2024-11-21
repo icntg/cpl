@@ -182,6 +182,20 @@ namespace net {
             return 0;
         }
 
+        inline int32_t JoinAddressStrings(const uint32_t &hostBE, const uint32_t &maskBE, string &out) {
+            uint8_t bm{};
+            const auto r00 = net::ipv4::UintMaskToByteMask(maskBE, bm);
+            if (r00 != 0) {
+                return r00;
+            }
+            out = strings::Format(
+                "%s/%hhu",
+                net::ipv4::UINT32ToIPString(hostBE).data(),
+                bm
+            );
+            return 0;
+        }
+
         inline int32_t SplitAddressString(const string &address, uint32_t &hostBE, uint32_t &maskBE) {
             const auto v = strings::Split(address, "/");
             if (v.size() != 2) {
@@ -246,7 +260,7 @@ namespace net {
                 s = strings::Format(R"("AddressLength":%u)", a->AddressLength);
                 t.push_back(s);
                 s = strings::Format(R"("Address":"%s")",
-                                    strings::Hexlify(string((char *) a->Address, a->AddressLength)).data());
+                                    strings::Hex(string((char *) a->Address, a->AddressLength)).data());
                 t.push_back(s);
                 s = strings::Format(R"("Index":%lu)", a->Index);
                 t.push_back(s);
