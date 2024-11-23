@@ -1,7 +1,6 @@
 #ifndef STRINGS_HPP_PNFK2EXVBOBKFYHHBIBEH3Z4
 #define STRINGS_HPP_PNFK2EXVBOBKFYHHBIBEH3Z4
 
-#include <algorithm>
 #include <string>
 #include <cstring>
 #include <cstdarg>

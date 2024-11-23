@@ -10,6 +10,24 @@ using namespace std;
 
 namespace net {
     namespace ipv4 {
+        class AddressWithMask {
+        public:
+            uint32_t Address;
+            uint32_t Mask;
+
+            AddressWithMask(const uint32_t address, const uint32_t mask)
+                : Address(address),
+                  Mask(mask) {
+            }
+
+            DWORD GetAddress() const {
+                return Address;
+            }
+            DWORD GetMask() const {
+                return Mask;
+            }
+        };
+
         inline uint32_t TransEndian(uint32_t v) {
             uint32_t r{};
             r |= (v & 0xff) << 24;
