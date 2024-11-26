@@ -206,6 +206,36 @@ namespace base {
             virtual bool ToBeContinued() = 0;
         };
     }
+
+
+    class ILogger {
+    public:
+        enum class LEVEL {
+            $TRACE = 0,
+            $DEBUG = 10,
+            $INFO = 20,
+            $WARN = 30,
+            $ERROR = 40,
+            $FATAL = 50,
+        };
+
+        virtual ~ILogger() = default;
+
+        virtual LEVEL GetLevel() = 0;
+        virtual void SetLevel(LEVEL level) = 0;
+
+        virtual void Trace(const char *fmt, ...) = 0;
+
+        virtual void Debug(const char *fmt, ...) = 0;
+
+        virtual void Info(const char *fmt, ...) = 0;
+
+        virtual void Warn(const char *fmt, ...) = 0;
+
+        virtual void Error(const char *fmt, ...) = 0;
+
+        virtual void Fatal(const char *fmt, ...) = 0;
+    };
 }
 
 #endif //BASE_H_UNDERSCORE_EXEMPLARY_CONVERSATION_NEIGHBORHOOD_DOCUMENTATION_STRATEGY_ANALYSIS_EXEMPLARY
