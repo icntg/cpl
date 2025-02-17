@@ -14,8 +14,6 @@
 #include <wininet.h>
 
 #include "../utility/base.hpp"
-#include "../../ccl/vendor/logger/log.h"
-#include "../../ccl/utility/macro.h"
 
 using namespace std;
 
@@ -25,10 +23,10 @@ using namespace std;
     if (nullptr == fnMem) { \
         const DWORD e = GetLastError(); \
         retCode = static_cast<INT32>(e); \
-        log_error("GetProcAddress <%s> in <%s> failed [0x%x]: %s", (#fnDll), (dynMod) -> szDllName.data(), e, FormatError(e).data()); \
+        fprintf(stderr, "[x] GetProcAddress <%s> in <%s> failed [0x%lx]: %s", (#fnDll), (dynMod) -> szDllName.data(), e, FormatError(e).data()); \
         if (exitOnErr) { goto __ERROR__; } \
     } else { \
-        log_trace("GetProcAddress <%s> in <%s>@<0x%x> successfully", (#fnDll), (dynMod) -> szDllName.data(), fnMem); \
+        fprintf(stdout, "[!] GetProcAddress <%s> in <%s>@<%p> successfully", (#fnDll), (dynMod) -> szDllName.data(), fnMem); \
     } \
 }
 
@@ -65,9 +63,10 @@ namespace cpl {
                     if (nullptr == hModule) {
                         const DWORD e = GetLastError();
                         retCode = static_cast<INT32>(e);
-                        log_error("LoadLibrary <%s> failed [0x%x]: %s", szDllName.data(), e, FormatError(e).data());
+                        fprintf(stderr, "[x] LoadLibrary <%s> failed [0x%x]: %s", szDllName.data(), e, FormatError(e).data());
+                        goto __ERROR__;
                     }
-                    log_trace("LoadLibrary <%s> successfully", szDllName.data());
+                    fprintf(stdout, "[!] LoadLibrary <%s> successfully", szDllName.data());
                     goto __FREE__;
                 __ERROR__:
                     PASS;
@@ -82,8 +81,7 @@ namespace cpl {
                         if (!bRet) {
                             const DWORD e = GetLastError();
                             retCode = static_cast<INT32>(e);
-                            log_error("FreeLibrary <%s> failed [0x%x]: %s", szDllName.data(), e,
-                                      FormatError(e).data());
+                            fprintf(stderr, "[x] FreeLibrary <%s> failed [0x%x]: %s", szDllName.data(), e, FormatError(e).data());
                         }
                         hModule = nullptr;
                     }
