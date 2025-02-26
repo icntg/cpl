@@ -1,6 +1,7 @@
 #ifndef CPL_STRINGS_HPP_JUSTICE_TENSION_STRONGER_MOISTURE_BRIGHTLY_CULTURE_ENCHANTED_GALLERY
 #define CPL_STRINGS_HPP_JUSTICE_TENSION_STRONGER_MOISTURE_BRIGHTLY_CULTURE_ENCHANTED_GALLERY
 
+#include <algorithm>
 #include <string>
 #include <cstring>
 #include <cstdarg>
@@ -189,12 +190,13 @@ namespace cpl {
         }
 
         inline bool IsDigital(const string &s) {
-            for (const auto ch: s) {
-                if (ch < _T('0') || ch > _T('9')) {
-                    return false;
-                }
-            }
-            return true;
+            return all_of(s.begin(), s.end(), isdigit);
+            // for (const auto ch: s) {
+            //     if (ch < _T('0') || ch > _T('9')) {
+            //         return false;
+            //     }
+            // }
+            // return true;
         }
 
         inline TCHAR Upper(const TCHAR c) {
@@ -225,39 +227,63 @@ namespace cpl {
             return nullptr;
         }
 
-        inline string FromWString(const wstring &s, const UINT CodePage = CP_ACP) {
-            string ret{};
+        inline int32_t FromWString(const wstring &s, string &out, const UINT CodePage = CP_ACP) {
+            int32_t retCode = ERROR_SUCCESS;
             const auto size = WideCharToMultiByte(CodePage, 0, s.data(), -1, nullptr, 0, nullptr, nullptr);
             const auto buffer = new(nothrow) TCHAR[size];
             if (nullptr == buffer) {
+                retCode = ERROR_NOT_ENOUGH_MEMORY;
                 goto __ERROR__;
             }
-            WideCharToMultiByte(CodePage, 0, s.data(), -1, buffer, size, nullptr, nullptr);
-            ret = string(buffer);
+            const auto r0 = WideCharToMultiByte(CodePage, 0, s.data(), -1, buffer, size, nullptr, nullptr);
+            if (0 == r0) {
+                const auto e = GetLastError();
+                retCode = static_cast<int32_t>(e);
+                goto __ERROR__;
+            }
+            out = string(buffer);
             goto __FREE__;
         __ERROR__:
             do {
             } while (false);
         __FREE__:
             delete[] buffer;
+            return retCode;
+        }
+
+        inline string FromWString(const wstring &s, const UINT CodePage = CP_ACP) {
+            string ret{};
+            FromWString(s, ret, CodePage);
             return ret;
+        }
+
+        inline int32_t FromString(const string &s, wstring &out, const UINT CodePage = CP_ACP) {
+            int32_t retCode = ERROR_SUCCESS;
+            const auto size = MultiByteToWideChar(CodePage, 0, s.data(), -1, nullptr, 0);
+            const auto buffer = new(nothrow) wchar_t[size];
+            if (nullptr == buffer) {
+                retCode = ERROR_NOT_ENOUGH_MEMORY;
+                goto __ERROR__;
+            }
+            const auto r0 = MultiByteToWideChar(CodePage, 0, s.data(), -1, buffer, size);
+            if (0 == r0) {
+                const auto e = GetLastError();
+                retCode = static_cast<int32_t>(e);
+                goto __ERROR__;
+            }
+            out = wstring(buffer);
+            goto __FREE__;
+        __ERROR__:
+            do {
+            } while (false);
+        __FREE__:
+            delete[] buffer;
+            return retCode;
         }
 
         inline wstring FromString(const string &s, const UINT CodePage = CP_ACP) {
             wstring ret{};
-            const auto size = MultiByteToWideChar(CodePage, 0, s.data(), -1, nullptr, 0);
-            const auto buffer = new(nothrow) wchar_t[size];
-            if (nullptr == buffer) {
-                goto __ERROR__;
-            }
-            MultiByteToWideChar(CodePage, 0, s.data(), -1, buffer, size);
-            ret = wstring(buffer);
-            goto __FREE__;
-        __ERROR__:
-            do {
-            } while (false);
-        __FREE__:
-            delete[] buffer;
+            FromString(s, ret, CodePage);
             return ret;
         }
 
