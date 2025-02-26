@@ -5,6 +5,10 @@
 #include <string>
 #include <windows.h>
 
+#ifndef PASS
+#define PASS do{}while(false)
+#endif
+
 namespace cpl {
     namespace base {
         //单例模板
