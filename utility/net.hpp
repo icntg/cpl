@@ -1,8 +1,11 @@
 #ifndef CPL_NET_JUSTICE_TREASURE_ADVANCE_STRONG_GLORIOUS_ENCHANTMENT_MAJESTIC
 #define CPL_NET_JUSTICE_TREASURE_ADVANCE_STRONG_GLORIOUS_ENCHANTMENT_MAJESTIC
 
+#include <windows.h>
+#include <iphlpapi.h>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "strings.hpp"
 
@@ -247,15 +250,16 @@ namespace cpl {
 
         namespace sys {
             class Adapter final : public base::serialize::ISerializeJson {
-                const IP_ADAPTER_INFO *a{};
+            protected:
+                PIP_ADAPTER_INFO ptrSysAdapter;
 
-                static string makeList(const IP_ADDR_STRING *pa) {
-                    vector<string> a{};
+                static string makeList(PIP_ADDR_STRING pa) {
+                    vector<string> a;
                     for (auto p = pa; nullptr != p; p = p->Next) {
                         const auto s = strings::Format(
                             R"("%s/%s$%lu")",
-                            strings::ReplaceAll(p->IpAddress.String, "\"", "\\\"").data(),
-                            strings::ReplaceAll(p->IpMask.String, "\"", "\\\"").data(),
+                            strings::ReplaceAll(p->IpAddress.String, R"(")", R"(\")").data(),
+                            strings::ReplaceAll(p->IpMask.String, R"(")", R"(\")").data(),
                             p->Context
                         );
                         a.push_back(s);
@@ -264,66 +268,66 @@ namespace cpl {
                 }
 
             public:
-                explicit Adapter(const IP_ADAPTER_INFO *a) {
-                    this->a = a;
+                explicit Adapter(PIP_ADAPTER_INFO a): ptrSysAdapter(a) {
+                    // this->ptrSysAdapter = a;
                 }
 
                 string Serialize() override {
                     vector<string> t{};
                     string s{};
 
-                    s = strings::Format(R"("ComboIndex":%lu)", a->ComboIndex);
+                    s = strings::Format(R"("ComboIndex":%lu)", ptrSysAdapter->ComboIndex);
                     t.push_back(s);
                     s = strings::Format(R"("AdapterName":"%s")",
-                                        strings::ReplaceAll(a->AdapterName, "\"", "\\\"").data());
+                                        strings::ReplaceAll(ptrSysAdapter->AdapterName, R"(")", R"(\")").data());
                     t.push_back(s);
                     s = strings::Format(R"("Description":"%s")",
-                                        strings::ReplaceAll(a->Description, "\"", "\\\"").data());
+                                        strings::ReplaceAll(ptrSysAdapter->Description, R"(")", R"(\")").data());
                     t.push_back(s);
-                    s = strings::Format(R"("AddressLength":%u)", a->AddressLength);
+                    s = strings::Format(R"("AddressLength":%u)", ptrSysAdapter->AddressLength);
                     t.push_back(s);
                     char *p{};
-                    memmove(&p, &a->Address, sizeof(void *));
-                    s = strings::Format(R"("Address":"%s")", strings::Hex(string(p, a->AddressLength)).data());
+                    memmove(&p, &ptrSysAdapter->Address, sizeof(void *));
+                    s = strings::Format(R"("Address":"%s")", strings::Hex(string(p, ptrSysAdapter->AddressLength)).data());
                     t.push_back(s);
-                    s = strings::Format(R"("Index":%lu)", a->Index);
+                    s = strings::Format(R"("Index":%lu)", ptrSysAdapter->Index);
                     t.push_back(s);
-                    s = strings::Format(R"("Type":%u)", a->Type);
+                    s = strings::Format(R"("Type":%u)", ptrSysAdapter->Type);
                     t.push_back(s);
-                    s = strings::Format(R"("DhcpEnabled":%u)", a->DhcpEnabled);
+                    s = strings::Format(R"("DhcpEnabled":%u)", ptrSysAdapter->DhcpEnabled);
                     t.push_back(s);
-                    if (!a->CurrentIpAddress) {
+                    if (!ptrSysAdapter->CurrentIpAddress) {
                         s = R"("CurrentIpAddress":null)";
                     } else {
                         s = strings::Format(
                             R"("CurrentIpAddress":"%s/%s$%lu")",
-                            strings::ReplaceAll(a->CurrentIpAddress->IpAddress.String, "\"", "\\\"").data(),
-                            strings::ReplaceAll(a->CurrentIpAddress->IpMask.String, "\"", "\\\"").data(),
-                            a->CurrentIpAddress->Context
+                            strings::ReplaceAll(ptrSysAdapter->CurrentIpAddress->IpAddress.String, R"(")", R"(\")").data(),
+                            strings::ReplaceAll(ptrSysAdapter->CurrentIpAddress->IpMask.String, R"(")", R"(\")").data(),
+                            ptrSysAdapter->CurrentIpAddress->Context
                         );
                     }
                     t.push_back(s);
-                    s = strings::Format(R"("IpAddressList":%s)", makeList(&a->IpAddressList).data());
+                    s = strings::Format(R"("IpAddressList":%s)", makeList(&ptrSysAdapter->IpAddressList).data());
                     t.push_back(s);
-                    s = strings::Format(R"("GatewayList":%s)", makeList(&a->GatewayList).data());
+                    s = strings::Format(R"("GatewayList":%s)", makeList(&ptrSysAdapter->GatewayList).data());
                     t.push_back(s);
-                    s = strings::Format(R"("DhcpServer":%s)", makeList(&a->DhcpServer).data());
+                    s = strings::Format(R"("DhcpServer":%s)", makeList(&ptrSysAdapter->DhcpServer).data());
                     t.push_back(s);
-                    s = strings::Format(R"("HaveWins":%d)", a->HaveWins);
+                    s = strings::Format(R"("HaveWins":%d)", ptrSysAdapter->HaveWins);
                     t.push_back(s);
-                    s = strings::Format(R"("PrimaryWinsServer":%s)", makeList(&a->PrimaryWinsServer).data());
+                    s = strings::Format(R"("PrimaryWinsServer":%s)", makeList(&ptrSysAdapter->PrimaryWinsServer).data());
                     t.push_back(s);
-                    s = strings::Format(R"("SecondaryWinsServer":%s)", makeList(&a->SecondaryWinsServer).data());
+                    s = strings::Format(R"("SecondaryWinsServer":%s)", makeList(&ptrSysAdapter->SecondaryWinsServer).data());
                     t.push_back(s);
 #ifdef _USE_32BIT_TIME_T
-                    s = strings::Format(R"("LeaseObtained":%ld)", a->LeaseObtained);
+                    s = strings::Format(R"("LeaseObtained":%ld)", ptrSysAdapter->LeaseObtained);
                     t.push_back(s);
-                    s = strings::Format(R"("LeaseExpires":%ld)", a->LeaseExpires);
+                    s = strings::Format(R"("LeaseExpires":%ld)", ptrSysAdapter->LeaseExpires);
                     t.push_back(s);
 #else
-                    s = strings::Format(R"("LeaseObtained":%l64d)", a->LeaseObtained);
+                    s = strings::Format(R"("LeaseObtained":%l64d)", ptrSysAdapter->LeaseObtained);
                     t.push_back(s);
-                    s = strings::Format(R"("LeaseExpires":%l64d)", a->LeaseExpires);
+                    s = strings::Format(R"("LeaseExpires":%l64d)", ptrSysAdapter->LeaseExpires);
                     t.push_back(s);
 #endif
 
@@ -337,17 +341,18 @@ namespace cpl {
             };
 
             class Adapters final : public base::serialize::ISerializeJson {
-                const IP_ADAPTER_INFO *a{};
+            protected:
+                PIP_ADAPTER_INFO ptrSysAdapter{};
                 vector<string> va{};
 
             public:
-                explicit Adapters(const IP_ADAPTER_INFO *a) {
-                    this->a = a;
+                explicit Adapters(PIP_ADAPTER_INFO a) {
+                    this->ptrSysAdapter = a;
                 }
 
                 string Serialize() override {
-                    for (auto pa = a; nullptr != pa; pa = pa->Next) {
-                        Adapter adapter = Adapter(pa);
+                    for (auto pa = ptrSysAdapter; nullptr != pa; pa = pa->Next) {
+                        Adapter adapter(pa);
                         const auto s = adapter.Serialize();
                         va.push_back(s);
                     }
@@ -426,11 +431,11 @@ namespace cpl {
             };
 
             class IpForwardTable final : public base::serialize::ISerializeJson {
-                const MIB_IPFORWARDTABLE *t{};
+                PMIB_IPFORWARDTABLE t{};
                 vector<string> vr{};
 
             public:
-                explicit IpForwardTable(const MIB_IPFORWARDTABLE *t) {
+                explicit IpForwardTable(PMIB_IPFORWARDTABLE t) {
                     this->t = t;
                 }
 

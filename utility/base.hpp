@@ -5,6 +5,10 @@
 #include <string>
 #include <windows.h>
 
+#ifndef PASS
+#define PASS do{}while(false)
+#endif
+
 namespace cpl {
     namespace base {
         //单例模板
@@ -173,7 +177,7 @@ namespace cpl {
         namespace serialize {
             class ISerialize {
             public:
-                virtual std::string Serialize() = 0;
+                virtual std::string Serialize() const = 0;
 
                 virtual int32_t Deserialize(const std::string &s) = 0;
 
