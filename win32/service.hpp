@@ -3,14 +3,94 @@
 
 #include <windows.h>
 #include <string>
-
-#include "api.hpp"
+#include <cstdio>
 
 using namespace std;
 
 namespace cpl {
     namespace win32 {
         namespace service {
+            // 安装服务
+            inline int32_t Install (
+                    const wstring &ServiceName,
+                    const wstring &DisplayName,
+                    const wstring &ExecutePath
+            ) {
+                int32_t retCode{};
+                SC_HANDLE scmHandle{};
+                SC_HANDLE serviceHandle{};
+
+                scmHandle = OpenSCManager(nullptr, nullptr, SC_MANAGER_ALL_ACCESS);
+                if (!scmHandle) {
+                    const auto e = GetLastError();
+                    fprintf(stderr, "[x] OpenSCManager failed 0x%lx:%s", e, FormatError(e).data());
+                    retCode = static_cast<int32_t>(e);
+                    goto __ERROR__;
+                }
+
+                serviceHandle = CreateServiceW(
+                        scmHandle,
+                        ServiceName.data(),
+                        DisplayName.data(),
+                        SERVICE_ALL_ACCESS,
+                        SERVICE_WIN32_OWN_PROCESS,
+                        SERVICE_AUTO_START,
+                        SERVICE_ERROR_NORMAL,
+                        ExecutePath.data(),
+                        nullptr,
+                        nullptr,
+                        nullptr,
+                        nullptr,
+                        nullptr
+                );
+                if (!serviceHandle) {
+                    const auto e = GetLastError();
+                    fprintf(stderr, "[x] CreateServiceW failed 0x%lx:%s", e, FormatError(e).data());
+                    retCode = static_cast<int32_t>(e);
+                    goto __ERROR__;
+                }
+                wprintf(L"[!] Service <%s> installed successfully!", ServiceName.data());
+
+                goto __FREE__;
+                __ERROR__:
+                PASS;
+                __FREE__:
+                CloseServiceHandle(serviceHandle);
+                CloseServiceHandle(scmHandle);
+                return retCode;
+            }
+
+            // 卸载服务
+            inline int32_t Uninstall(const wstring &ServiceName) {
+                int32_t retCode{};
+                SC_HANDLE scmHandle{};
+                SC_HANDLE serviceHandle{};
+
+                scmHandle = OpenSCManager(nullptr, nullptr, SC_MANAGER_ALL_ACCESS);
+                if (!scmHandle) {
+                    const auto e = GetLastError();
+                    fprintf(stderr, "[x] OpenSCManager failed 0x%lx:%s", e, FormatError(e).data());
+                    retCode = static_cast<int32_t>(e);
+                    goto __ERROR__;
+                }
+                serviceHandle = OpenServiceW(scmHandle, ServiceName.data(), DELETE);
+                if (!serviceHandle) {
+                    const auto e = GetLastError();
+                    fprintf(stderr, "[x] OpenServiceW failed 0x%lx:%s", e, FormatError(e).data());
+                    retCode = static_cast<int32_t>(e);
+                    goto __ERROR__;
+                }
+                wprintf(L"[!] Service <%s> uninstalled successfully!", ServiceName.data());
+
+                goto __FREE__;
+                __ERROR__:
+                PASS;
+                __FREE__:
+                CloseServiceHandle(serviceHandle);
+                CloseServiceHandle(scmHandle);
+                return retCode;
+            }
+
             /**
              * 前置声明
              */
@@ -46,16 +126,16 @@ namespace cpl {
             public:
                 virtual ~WindowsService() = default;
 
-                WindowsService(const wstring &serviceName, IServiceEventLoop &wrapper) {
+                WindowsService(const wstring &serviceName, IServiceEventLoop *_wrapper) {
                     this->serviceName = serviceName;
-                    WindowsService::wrapper = &wrapper;
-                    wrapper.mService = this;
+                    WindowsService::wrapper = _wrapper;
+                    WindowsService::wrapper->mService = this;
                 }
 
                 virtual void Run() {
                     SERVICE_TABLE_ENTRYW serviceTable[] = {
-                        {const_cast<LPWSTR>(serviceName.data()), ServiceMainWrapper},
-                        {nullptr, nullptr}
+                            {const_cast<LPWSTR>(serviceName.data()), ServiceMainWrapper},
+                            {nullptr,                                nullptr}
                     };
 
                     if (StartServiceCtrlDispatcherW(serviceTable) == FALSE) {
@@ -103,7 +183,8 @@ namespace cpl {
                             SetServiceStatus(serviceStatusHandle, &serviceStatus);
                             return;
                         }
-                    } {
+                    }
+                    {
                         // todo 初始化可以放在这里。
                     }
 
@@ -137,7 +218,7 @@ namespace cpl {
                             serviceStatus.dwCurrentState = SERVICE_STOP_PENDING;
                             SetServiceStatus(serviceStatusHandle, &serviceStatus);
                             SetEvent(wrapper->stopEvent); // 通知服务停止
-                        // 停止事件循环
+                            // 停止事件循环
                             serviceStatus.dwCurrentState = SERVICE_STOPPED;
                             SetServiceStatus(serviceStatusHandle, &serviceStatus);
                             break;
