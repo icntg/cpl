@@ -177,7 +177,7 @@ namespace cpl {
         namespace serialize {
             class ISerialize {
             public:
-                virtual std::string Serialize() = 0;
+                virtual std::string Serialize() const = 0;
 
                 virtual int32_t Deserialize(const std::string &s) = 0;
 
