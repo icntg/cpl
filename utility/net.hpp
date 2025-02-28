@@ -366,6 +366,7 @@ namespace cpl {
             };
 
             class IpForwardRow final : public base::serialize::ISerializeJson {
+            protected:
                 const MIB_IPFORWARDROW *r{};
                 bool transferIPv4 = false;
 

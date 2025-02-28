@@ -24,36 +24,36 @@ namespace cpl {
 
                 return ERROR_SUCCESS;
             }
-
-            inline INT32 Dump$IP_ADAPTER_INFO$JSON(string &out, const IP_ADAPTER_INFO *ip_adapter_info) {
-                // todo
-                return ERROR_SUCCESS;
-            }
-
-            inline INT32 Dump$IP_ADAPTER_INFOs$JSON(string &out, const IP_ADAPTER_INFO *ip_adapter_info) {
-                // todo
-                return ERROR_SUCCESS;
-            }
-
-            inline INT32 Dump$MIB_IPFORWARDROW$JSON(string &out, const MIB_IPFORWARDROW *route4) {
-                // todo
-                return ERROR_SUCCESS;
-            }
-
-            inline INT32 Dump$MIB_IPFORWARDTABLE$JSON(string &out, const MIB_IPFORWARDTABLE *route4) {
-                // todo
-                return ERROR_SUCCESS;
-            }
-
-            inline INT32 Dump$MIB_IPFORWARD_ROW2$JSON(string &out, const api::ipv6::MIB_IPFORWARD_ROW2 *route4) {
-                // todo
-                return ERROR_SUCCESS;
-            }
-
-            inline INT32 Dump$MIB_IPFORWARD_TABLE2$JSON(string &out, const api::ipv6::MIB_IPFORWARD_TABLE2 *route4) {
-                // todo
-                return ERROR_SUCCESS;
-            }
+            //
+            // inline INT32 Dump$IP_ADAPTER_INFO$JSON(string &out, const IP_ADAPTER_INFO *ip_adapter_info) {
+            //     // todo
+            //     return ERROR_SUCCESS;
+            // }
+            //
+            // inline INT32 Dump$IP_ADAPTER_INFOs$JSON(string &out, const IP_ADAPTER_INFO *ip_adapter_info) {
+            //     // todo
+            //     return ERROR_SUCCESS;
+            // }
+            //
+            // inline INT32 Dump$MIB_IPFORWARDROW$JSON(string &out, const MIB_IPFORWARDROW *route4) {
+            //     // todo
+            //     return ERROR_SUCCESS;
+            // }
+            //
+            // inline INT32 Dump$MIB_IPFORWARDTABLE$JSON(string &out, const MIB_IPFORWARDTABLE *route4) {
+            //     // todo
+            //     return ERROR_SUCCESS;
+            // }
+            //
+            // inline INT32 Dump$MIB_IPFORWARD_ROW2$JSON(string &out, const api::ipv6::MIB_IPFORWARD_ROW2 *route4) {
+            //     // todo
+            //     return ERROR_SUCCESS;
+            // }
+            //
+            // inline INT32 Dump$MIB_IPFORWARD_TABLE2$JSON(string &out, const api::ipv6::MIB_IPFORWARD_TABLE2 *route4) {
+            //     // todo
+            //     return ERROR_SUCCESS;
+            // }
         }
 
         namespace network {
