@@ -16,6 +16,7 @@
 #include "../utility/base.hpp"
 
 using namespace std;
+using namespace cpl::net::ipv4;
 
 #ifndef PA
 #define PA(fnMem, fnDef, fnDll, dynMod, exitOnErr) { \
@@ -36,13 +37,13 @@ namespace cpl {
             static TCHAR buffer[BUFSIZ << 2u]{};
             memset(buffer, 0, sizeof(buffer));
             FormatMessage(
-                FORMAT_MESSAGE_FROM_SYSTEM,
-                nullptr,
-                errorCode,
-                0,
-                buffer,
-                BUFSIZ << 2,
-                nullptr
+                    FORMAT_MESSAGE_FROM_SYSTEM,
+                    nullptr,
+                    errorCode,
+                    0,
+                    buffer,
+                    BUFSIZ << 2,
+                    nullptr
             );
             const size_t n = _tcslen(buffer);
             if (n >= 2 && buffer[n - 2] == _T('\r') && buffer[n - 1] == _T('\n')) {
@@ -63,14 +64,15 @@ namespace cpl {
                     if (nullptr == hModule) {
                         const DWORD e = GetLastError();
                         retCode = static_cast<INT32>(e);
-                        fprintf(stderr, "[x] LoadLibrary <%s> failed [0x%x]: %s\n", szDllName.data(), e, FormatError(e).data());
+                        fprintf(stderr, "[x] LoadLibrary <%s> failed [0x%x]: %s\n", szDllName.data(), e,
+                                FormatError(e).data());
                         goto __ERROR__;
                     }
                     fprintf(stdout, "[!] LoadLibrary <%s> successfully\n", szDllName.data());
                     goto __FREE__;
-                __ERROR__:
+                    __ERROR__:
                     PASS;
-                __FREE__:
+                    __FREE__:
                     return retCode;
                 }
 
@@ -81,36 +83,37 @@ namespace cpl {
                         if (!bRet) {
                             const DWORD e = GetLastError();
                             retCode = static_cast<INT32>(e);
-                            fprintf(stderr, "[x] FreeLibrary <%s> failed [0x%x]: %s\n", szDllName.data(), e, FormatError(e).data());
+                            fprintf(stderr, "[x] FreeLibrary <%s> failed [0x%x]: %s\n", szDllName.data(), e,
+                                    FormatError(e).data());
                         }
                         hModule = nullptr;
                     }
                     goto __FREE__;
-                __ERROR__:
+                    __ERROR__:
                     PASS;
-                __FREE__:
+                    __FREE__:
                     return retCode;
                 }
             };
 
             namespace crypto {
                 typedef BOOL (WINAPI *CryptGenRandom)(
-                    HCRYPTPROV hProv,
-                    DWORD dwLen,
-                    BYTE *pbBuffer
+                        HCRYPTPROV hProv,
+                        DWORD dwLen,
+                        BYTE *pbBuffer
                 );
 
                 typedef BOOL (WINAPI *CryptAcquireContextA)(
-                    HCRYPTPROV *phProv,
-                    LPCSTR szContainer,
-                    LPCSTR szProvider,
-                    DWORD dwProvType,
-                    DWORD dwFlags
+                        HCRYPTPROV *phProv,
+                        LPCSTR szContainer,
+                        LPCSTR szProvider,
+                        DWORD dwProvType,
+                        DWORD dwFlags
                 );
 
                 typedef BOOL (WINAPI *CryptReleaseContext)(
-                    HCRYPTPROV hProv,
-                    DWORD dwFlags
+                        HCRYPTPROV hProv,
+                        DWORD dwFlags
                 );
 
                 class DynamicModule final : public api::DynamicModule {
@@ -128,9 +131,9 @@ namespace cpl {
                         PA(CryptAcquireContextA, crypto::CryptAcquireContextA, CryptAcquireContextA, this, false);
                         PA(CryptReleaseContext, crypto::CryptReleaseContext, CryptReleaseContext, this, false);
                         goto __FREE__;
-                    __ERROR__:
+                        __ERROR__:
                         PASS;
-                    __FREE__:
+                        __FREE__:
                         return retCode;
                     }
 
@@ -145,8 +148,8 @@ namespace cpl {
 
             namespace ws32 {
                 typedef int (WINAPI *WSAStartup)(
-                    _In_ WORD wVersionRequested,
-                    _Out_ LPWSADATA lpWSAData
+                        _In_ WORD wVersionRequested,
+                        _Out_ LPWSADATA lpWSAData
                 );
 
                 typedef int (WINAPI *WSACleanup)();
@@ -154,26 +157,26 @@ namespace cpl {
                 typedef int (WINAPI *WSAGetLastError)();
 
                 typedef SOCKET (WINAPI *socket)(
-                    _In_ int af,
-                    _In_ int type,
-                    _In_ int protocol
+                        _In_ int af,
+                        _In_ int type,
+                        _In_ int protocol
                 );
 
                 typedef u_short (WINAPI *htons)(
-                    _In_ u_short hostshort
+                        _In_ u_short hostshort
                 );
 
                 typedef unsigned long (WINAPI *inet_addr)(
-                    const char *cp
+                        const char *cp
                 );
 
                 typedef int (WINAPI *sendto)(
-                    _In_ SOCKET s,
-                    _In_ const char *buf,
-                    _In_ int len,
-                    _In_ int flags,
-                    _In_ const sockaddr *to,
-                    _In_ int tolen
+                        _In_ SOCKET s,
+                        _In_ const char *buf,
+                        _In_ int len,
+                        _In_ int flags,
+                        _In_ const sockaddr *to,
+                        _In_ int tolen
                 );
 
                 typedef int (WINAPI *closesocket)(_In_ SOCKET s);
@@ -205,9 +208,9 @@ namespace cpl {
                         PA(sendto, ws32::sendto, sendto, this, true);
 
                         goto __FREE__;
-                    __ERROR__:
+                        __ERROR__:
                         PASS;
-                    __FREE__:
+                        __FREE__:
                         return retCode;
                     }
 
@@ -227,52 +230,52 @@ namespace cpl {
 
             namespace inet {
                 typedef HINTERNET (WINAPI *InternetOpenA)(
-                    LPCSTR lpszAgent,
-                    DWORD dwAccessType,
-                    LPCSTR lpszProxy,
-                    LPCSTR lpszProxyBypass,
-                    DWORD dwFlags
+                        LPCSTR lpszAgent,
+                        DWORD dwAccessType,
+                        LPCSTR lpszProxy,
+                        LPCSTR lpszProxyBypass,
+                        DWORD dwFlags
                 );
 
                 typedef HINTERNET (WINAPI *InternetConnectA)(
-                    HINTERNET hInternet,
-                    LPCSTR lpszServerName,
-                    INTERNET_PORT nServerPort,
-                    LPCSTR lpszUserName,
-                    LPCSTR lpszPassword,
-                    DWORD dwService,
-                    DWORD dwFlags,
-                    DWORD_PTR dwContext
+                        HINTERNET hInternet,
+                        LPCSTR lpszServerName,
+                        INTERNET_PORT nServerPort,
+                        LPCSTR lpszUserName,
+                        LPCSTR lpszPassword,
+                        DWORD dwService,
+                        DWORD dwFlags,
+                        DWORD_PTR dwContext
                 );
 
                 typedef HINTERNET (WINAPI *HttpOpenRequestA)(
-                    HINTERNET hConnect,
-                    LPCSTR lpszVerb,
-                    LPCSTR lpszObjectName,
-                    LPCSTR lpszVersion,
-                    LPCSTR lpszReferrer,
-                    LPCSTR *lplpszAcceptTypes,
-                    DWORD dwFlags,
-                    DWORD_PTR dwContext
+                        HINTERNET hConnect,
+                        LPCSTR lpszVerb,
+                        LPCSTR lpszObjectName,
+                        LPCSTR lpszVersion,
+                        LPCSTR lpszReferrer,
+                        LPCSTR *lplpszAcceptTypes,
+                        DWORD dwFlags,
+                        DWORD_PTR dwContext
                 );
 
                 typedef BOOL (WINAPI *HttpSendRequestA)(
-                    HINTERNET hRequest,
-                    LPCSTR lpszHeaders,
-                    DWORD dwHeadersLength,
-                    LPVOID lpOptional,
-                    DWORD dwOptionalLength
+                        HINTERNET hRequest,
+                        LPCSTR lpszHeaders,
+                        DWORD dwHeadersLength,
+                        LPVOID lpOptional,
+                        DWORD dwOptionalLength
                 );
 
                 typedef BOOL (WINAPI *InternetReadFile)(
-                    _In_ HINTERNET hFile,
-                    _Out_ LPVOID lpBuffer,
-                    _In_ DWORD dwNumberOfBytesToRead,
-                    _Out_ LPDWORD lpdwNumberOfBytesRead
+                        _In_ HINTERNET hFile,
+                        _Out_ LPVOID lpBuffer,
+                        _In_ DWORD dwNumberOfBytesToRead,
+                        _Out_ LPDWORD lpdwNumberOfBytesRead
                 );
 
                 typedef BOOL (WINAPI *InternetCloseHandle)(
-                    HINTERNET hInternet
+                        HINTERNET hInternet
                 );
 
                 class DynamicModule final : public api::DynamicModule {
@@ -299,9 +302,9 @@ namespace cpl {
                         PA(InternetCloseHandle, inet::InternetCloseHandle, InternetCloseHandle, this, true);
 
                         goto __FREE__;
-                    __ERROR__:
+                        __ERROR__:
                         PASS;
-                    __FREE__:
+                        __FREE__:
                         return retCode;
                     }
 
@@ -319,22 +322,22 @@ namespace cpl {
 
             namespace ipv4 {
                 typedef ULONG (WINAPI *GetAdaptersInfo)(
-                    PIP_ADAPTER_INFO AdapterInfo, PULONG
-                    SizePointer);
+                        PIP_ADAPTER_INFO AdapterInfo, PULONG
+                SizePointer);
 
                 typedef DWORD (WINAPI *GetIpForwardTable)(
-                    PMIB_IPFORWARDTABLE pIpForwardTable,
-                    PULONG
-                    pdwSize,
-                    BOOL bOrder
+                        PMIB_IPFORWARDTABLE pIpForwardTable,
+                        PULONG
+                        pdwSize,
+                        BOOL bOrder
                 );
 
                 typedef DWORD (WINAPI *DeleteIpForwardEntry)(
-                    PMIB_IPFORWARDROW pRoute
+                        PMIB_IPFORWARDROW pRoute
                 );
 
                 typedef DWORD (WINAPI *CreateIpForwardEntry)(
-                    PMIB_IPFORWARDROW pRoute
+                        PMIB_IPFORWARDROW pRoute
                 );
 
                 class DynamicModule final : public api::DynamicModule {
@@ -357,9 +360,9 @@ namespace cpl {
                         PA(DeleteIpForwardEntry, ipv4::DeleteIpForwardEntry, DeleteIpForwardEntry, this, true);
 
                         goto __FREE__;
-                    __ERROR__:
+                        __ERROR__:
                         PASS;
-                    __FREE__:
+                        __FREE__:
                         return retCode;
                     }
 
@@ -436,16 +439,16 @@ namespace cpl {
                 } MIB_IPFORWARD_TABLE2, *PMIB_IPFORWARD_TABLE2;
 
                 typedef DWORD (WINAPI *GetIpForwardTable2)(
-                    ADDRESS_FAMILY Family,
-                    PMIB_IPFORWARD_TABLE2 *Table
+                        ADDRESS_FAMILY Family,
+                        PMIB_IPFORWARD_TABLE2 *Table
                 );
 
                 typedef DWORD (WINAPI *DeleteIpForwardEntry2)(
-                    const MIB_IPFORWARD_ROW2 *Row
+                        const MIB_IPFORWARD_ROW2 *Row
                 );
 
                 typedef VOID (WINAPI *FreeMibTable)(
-                    PVOID Memory
+                        PVOID Memory
                 );
 
                 class DynamicModule final : public api::DynamicModule {
@@ -466,9 +469,9 @@ namespace cpl {
                         PA(FreeMibTable, ipv6::FreeMibTable, FreeMibTable, this, false);
 
                         goto __FREE__;
-                    __ERROR__:
+                        __ERROR__:
                         PASS;
-                    __FREE__:
+                        __FREE__:
                         return retCode;
                     }
 
@@ -483,31 +486,31 @@ namespace cpl {
 
             namespace psapi {
                 typedef DWORD (WINAPI *GetModuleFileNameExA)(
-                    _In_ HANDLE hProcess,
-                    _In_opt_ HMODULE hModule,
-                    _Out_ LPSTR lpFilename,
-                    _In_ DWORD nSize
+                        _In_ HANDLE hProcess,
+                        _In_opt_ HMODULE hModule,
+                        _Out_ LPSTR lpFilename,
+                        _In_ DWORD nSize
                 );
 
                 typedef BOOL (WINAPI *EnumProcesses)(
-                    _Out_ DWORD *lpidProcess,
-                    _In_ DWORD cb,
-                    _Out_ LPDWORD lpcbNeeded
+                        _Out_ DWORD *lpidProcess,
+                        _In_ DWORD cb,
+                        _Out_ LPDWORD lpcbNeeded
                 );
 
                 typedef BOOL (WINAPI *EnumProcessModules)(
-                    _In_ HANDLE hProcess,
-                    _Out_ HMODULE *lphModule,
-                    _In_ DWORD cb,
-                    _Out_ LPDWORD lpcbNeeded
+                        _In_ HANDLE hProcess,
+                        _Out_ HMODULE *lphModule,
+                        _In_ DWORD cb,
+                        _Out_ LPDWORD lpcbNeeded
                 );
 
                 typedef BOOL (WINAPI *EnumProcessModulesEx)(
-                    _In_ HANDLE hProcess,
-                    _Out_ HMODULE *lphModule,
-                    _In_ DWORD cb,
-                    _Out_ LPDWORD lpcbNeeded,
-                    _In_ DWORD dwFilterFlag
+                        _In_ HANDLE hProcess,
+                        _Out_ HMODULE *lphModule,
+                        _In_ DWORD cb,
+                        _Out_ LPDWORD lpcbNeeded,
+                        _In_ DWORD dwFilterFlag
                 );
 
                 class DynamicModule final : public api::DynamicModule {
@@ -530,9 +533,9 @@ namespace cpl {
                         PA(EnumProcessModulesEx, psapi::EnumProcessModulesEx, EnumProcessModulesEx, this, true);
 
                         goto __FREE__;
-                    __ERROR__:
+                        __ERROR__:
                         PASS;
-                    __FREE__:
+                        __FREE__:
                         return retCode;
                     }
 
@@ -554,11 +557,11 @@ namespace cpl {
                 typedef BOOL (WINAPI *NtTerminateProcess)(HANDLE hProcess, UINT);
 
                 typedef __kernel_entry NTSTATUS (WINAPI *NtQueryInformationProcess)(
-                    _In_ HANDLE ProcessHandle,
-                    _In_ PROCESSINFOCLASS ProcessInformationClass,
-                    _Out_ PVOID ProcessInformation,
-                    _In_ ULONG ProcessInformationLength,
-                    _Out_opt_ PULONG ReturnLength
+                        _In_ HANDLE ProcessHandle,
+                        _In_ PROCESSINFOCLASS ProcessInformationClass,
+                        _Out_ PVOID ProcessInformation,
+                        _In_ ULONG ProcessInformationLength,
+                        _Out_opt_ PULONG ReturnLength
                 );
 
                 class DynamicModule final : public api::DynamicModule {
@@ -582,9 +585,9 @@ namespace cpl {
                            true);
 
                         goto __FREE__;
-                    __ERROR__:
+                        __ERROR__:
                         PASS;
-                    __FREE__:
+                        __FREE__:
                         return retCode;
                     }
 
@@ -600,13 +603,13 @@ namespace cpl {
 
             namespace userenv {
                 typedef BOOL (WINAPI *CreateEnvironmentBlock)(
-                    _Out_ LPVOID *lpEnvironment,
-                    _In_opt_ HANDLE hToken,
-                    _In_ BOOL bInherit
+                        _Out_ LPVOID *lpEnvironment,
+                        _In_opt_ HANDLE hToken,
+                        _In_ BOOL bInherit
                 );
 
                 typedef BOOL (WINAPI *DestroyEnvironmentBlock)(
-                    _In_ LPVOID lpEnvironment
+                        _In_ LPVOID lpEnvironment
                 );
 
                 class DynamicModule final : public api::DynamicModule {
@@ -626,9 +629,9 @@ namespace cpl {
                            true);
 
                         goto __FREE__;
-                    __ERROR__:
+                        __ERROR__:
                         PASS;
-                    __FREE__:
+                        __FREE__:
                         return retCode;
                     }
 
@@ -654,9 +657,9 @@ namespace cpl {
                         retCode |= api::DynamicModule::Load();
 
                         goto __FREE__;
-                    __ERROR__:
+                        __ERROR__:
                         PASS;
-                    __FREE__:
+                        __FREE__:
                         return retCode;
                     }
 
@@ -668,13 +671,13 @@ namespace cpl {
 
             namespace user32 {
                 typedef LRESULT (WINAPI *SendMessageTimeoutA)(
-                    _In_ HWND hWnd,
-                    _In_ UINT Msg,
-                    _In_ WPARAM wParam,
-                    _In_ LPARAM lParam,
-                    _In_ UINT fuFlags,
-                    _In_ UINT uTimeout,
-                    _Out_opt_ PDWORD_PTR lpdwResult
+                        _In_ HWND hWnd,
+                        _In_ UINT Msg,
+                        _In_ WPARAM wParam,
+                        _In_ LPARAM lParam,
+                        _In_ UINT fuFlags,
+                        _In_ UINT uTimeout,
+                        _Out_opt_ PDWORD_PTR lpdwResult
                 );
 
                 class DynamicModule final : public api::DynamicModule {
@@ -690,9 +693,9 @@ namespace cpl {
                         PA(SendMessageTimeoutA, user32::SendMessageTimeoutA, SendMessageTimeoutA, this, true);
 
                         goto __FREE__;
-                    __ERROR__:
+                        __ERROR__:
                         PASS;
-                    __FREE__:
+                        __FREE__:
                         return retCode;
                     }
 
@@ -752,9 +755,9 @@ namespace cpl {
                     }
 
                     goto __FREE__;
-                __ERROR__:
+                    __ERROR__:
                     PASS;
-                __FREE__:
+                    __FREE__:
                     return retCode;
                 }
 
@@ -795,6 +798,261 @@ namespace cpl {
                 //            }
                 //            return instance;
                 //        }
+            };
+        }
+        namespace display {
+            class Adapter final : public base::serialize::ISerializeJson {
+            protected:
+                PIP_ADAPTER_INFO ptrSysAdapter;
+
+                static string makeList(PIP_ADDR_STRING pa) {
+                    vector<string> a;
+                    for (auto p = pa; nullptr != p; p = p->Next) {
+                        const auto s = strings::Format(
+                                R"("%s/%s$%lu")",
+                                strings::ReplaceAll(p->IpAddress.String, R"(")", R"(\")").data(),
+                                strings::ReplaceAll(p->IpMask.String, R"(")", R"(\")").data(),
+                                p->Context
+                        );
+                        a.push_back(s);
+                    }
+                    return string("[") + strings::Join(a, ",") + "]";
+                }
+
+            public:
+                explicit Adapter(PIP_ADAPTER_INFO a) : ptrSysAdapter(a) {
+                    // this->ptrSysAdapter = a;
+                }
+
+                string ToJson() override {
+                    vector<string> t{};
+                    string s{};
+
+                    s = strings::Format(R"("ComboIndex":%lu)", ptrSysAdapter->ComboIndex);
+                    t.push_back(s);
+                    s = strings::Format(R"("AdapterName":"%s")",
+                                        strings::ReplaceAll(ptrSysAdapter->AdapterName, R"(")", R"(\")").data());
+                    t.push_back(s);
+                    s = strings::Format(R"("Description":"%s")",
+                                        strings::ReplaceAll(ptrSysAdapter->Description, R"(")", R"(\")").data());
+                    t.push_back(s);
+                    s = strings::Format(R"("AddressLength":%u)", ptrSysAdapter->AddressLength);
+                    t.push_back(s);
+                    char *p{};
+                    memmove(&p, &ptrSysAdapter->Address, sizeof(void *));
+                    s = strings::Format(R"("Address":"%s")",
+                                        strings::Hex(string(p, ptrSysAdapter->AddressLength)).data());
+                    t.push_back(s);
+                    s = strings::Format(R"("Index":%lu)", ptrSysAdapter->Index);
+                    t.push_back(s);
+                    s = strings::Format(R"("Type":%u)", ptrSysAdapter->Type);
+                    t.push_back(s);
+                    s = strings::Format(R"("DhcpEnabled":%u)", ptrSysAdapter->DhcpEnabled);
+                    t.push_back(s);
+                    if (!ptrSysAdapter->CurrentIpAddress) {
+                        s = R"("CurrentIpAddress":null)";
+                    } else {
+                        s = strings::Format(
+                                R"("CurrentIpAddress":"%s/%s$%lu")",
+                                strings::ReplaceAll(ptrSysAdapter->CurrentIpAddress->IpAddress.String, R"(")",
+                                                    R"(\")").data(),
+                                strings::ReplaceAll(ptrSysAdapter->CurrentIpAddress->IpMask.String, R"(")",
+                                                    R"(\")").data(),
+                                ptrSysAdapter->CurrentIpAddress->Context
+                        );
+                    }
+                    t.push_back(s);
+                    s = strings::Format(R"("IpAddressList":%s)", makeList(&ptrSysAdapter->IpAddressList).data());
+                    t.push_back(s);
+                    s = strings::Format(R"("GatewayList":%s)", makeList(&ptrSysAdapter->GatewayList).data());
+                    t.push_back(s);
+                    s = strings::Format(R"("DhcpServer":%s)", makeList(&ptrSysAdapter->DhcpServer).data());
+                    t.push_back(s);
+                    s = strings::Format(R"("HaveWins":%d)", ptrSysAdapter->HaveWins);
+                    t.push_back(s);
+                    s = strings::Format(R"("PrimaryWinsServer":%s)",
+                                        makeList(&ptrSysAdapter->PrimaryWinsServer).data());
+                    t.push_back(s);
+                    s = strings::Format(R"("SecondaryWinsServer":%s)",
+                                        makeList(&ptrSysAdapter->SecondaryWinsServer).data());
+                    t.push_back(s);
+#ifdef _USE_32BIT_TIME_T
+                    s = strings::Format(R"("LeaseObtained":%ld)", ptrSysAdapter->LeaseObtained);
+                    t.push_back(s);
+                    s = strings::Format(R"("LeaseExpires":%ld)", ptrSysAdapter->LeaseExpires);
+                    t.push_back(s);
+#else
+                    s = strings::Format(R"("LeaseObtained":%l64d)", ptrSysAdapter->LeaseObtained);
+                    t.push_back(s);
+                    s = strings::Format(R"("LeaseExpires":%l64d)", ptrSysAdapter->LeaseExpires);
+                    t.push_back(s);
+#endif
+
+                    string ja = string("{") + strings::Join(t, ",") + "}";
+                    return ja;
+                }
+
+                int32_t FromJson(const string &s) override {
+                    return ERROR_EMPTY;
+                }
+            };
+
+            class Adapters final : public base::serialize::ISerializeJson {
+            protected:
+                PIP_ADAPTER_INFO ptrSysAdapter{};
+                vector<string> va{};
+
+            public:
+                explicit Adapters(PIP_ADAPTER_INFO a) {
+                    this->ptrSysAdapter = a;
+                }
+
+                string ToJson() override {
+                    for (auto pa = ptrSysAdapter; nullptr != pa; pa = pa->Next) {
+                        Adapter adapter(pa);
+                        const auto s = adapter.ToJson();
+                        va.push_back(s);
+                    }
+
+                    return string("[") + strings::Join(va, ",") + "]";
+                }
+
+                int32_t FromJson(const string &s) override {
+                    return ERROR_EMPTY;
+                }
+            };
+
+            class IpForwardRow final : public base::serialize::ISerializeJson {
+            protected:
+                const MIB_IPFORWARDROW *r{};
+                bool transferIPv4 = false;
+
+            public:
+                explicit IpForwardRow(const MIB_IPFORWARDROW *r, const bool transferIPv4 = false) {
+                    this->r = r;
+                    this->transferIPv4 = transferIPv4;
+                }
+
+                string ToJson() override {
+                    vector<string> t{};
+                    string s{};
+                    s = strings::Format(R"("dwForwardDest":%lu)", r->dwForwardDest);
+                    t.push_back(s);
+                    if (transferIPv4) {
+                        s = strings::Format(R"("ForwardDest":"%s")",
+                                            UINT32ToIPString(r->dwForwardDest, false).data());
+                        t.push_back(s);
+                    }
+                    s = strings::Format(R"("dwForwardMask":%lu)", r->dwForwardMask);
+                    t.push_back(s);
+                    if (transferIPv4) {
+                        s = strings::Format(R"("ForwardMask":"%s")",
+                                            UINT32ToIPString(r->dwForwardMask, false).data());
+                        t.push_back(s);
+                    }
+                    s = strings::Format(R"("dwForwardPolicy":%lu)", r->dwForwardPolicy);
+                    t.push_back(s);
+                    s = strings::Format(R"("dwForwardNextHop":%lu)", r->dwForwardNextHop);
+                    t.push_back(s);
+                    if (transferIPv4) {
+                        s = strings::Format(R"("ForwardNextHop":"%s")",
+                                            UINT32ToIPString(r->dwForwardNextHop, false).data());
+                        t.push_back(s);
+                    }
+                    s = strings::Format(R"("dwForwardIfIndex":%lu)", r->dwForwardIfIndex);
+                    t.push_back(s);
+                    s = strings::Format(R"("dwForwardType":%lu)", r->dwForwardType);
+                    t.push_back(s);
+                    s = strings::Format(R"("dwForwardProto":%lu)", r->dwForwardProto);
+                    t.push_back(s);
+                    s = strings::Format(R"("dwForwardAge":%lu)", r->dwForwardAge);
+                    t.push_back(s);
+                    s = strings::Format(R"("dwForwardNextHopAS":%lu)", r->dwForwardNextHopAS);
+                    t.push_back(s);
+                    s = strings::Format(R"("dwForwardMetric1":%lu)", r->dwForwardMetric1);
+                    t.push_back(s);
+                    s = strings::Format(R"("dwForwardMetric2":%lu)", r->dwForwardMetric2);
+                    t.push_back(s);
+                    s = strings::Format(R"("dwForwardMetric3":%lu)", r->dwForwardMetric3);
+                    t.push_back(s);
+                    s = strings::Format(R"("dwForwardMetric4":%lu)", r->dwForwardMetric4);
+                    t.push_back(s);
+                    s = strings::Format(R"("dwForwardMetric5":%lu)", r->dwForwardMetric5);
+                    t.push_back(s);
+                    string jr = string("{") + strings::Join(t, ",") + "}";
+                    return jr;
+                }
+
+                int32_t FromJson(const string &s) override {
+                    return ERROR_EMPTY;
+                }
+            };
+
+            class IpForwardTable final : public base::serialize::ISerializeJson {
+            protected:
+                PMIB_IPFORWARDTABLE t{};
+                vector<string> vr{};
+            public:
+                explicit IpForwardTable(PMIB_IPFORWARDTABLE t) {
+                    this->t = t;
+                }
+
+                string ToJson() override {
+                    for (auto i = 0; i < t->dwNumEntries; i++) {
+                        const auto &r = t->table[i];
+                        auto raw = IpForwardRow(&r);
+                        const auto s = raw.ToJson();
+                        this->vr.push_back(s);
+                    }
+
+                    return string("[") + strings::Join(vr, ",") + "]";
+                }
+
+                int32_t FromJson(const string &s) override {
+                    return ERROR_EMPTY;
+                }
+            };
+
+            class IpForwardRow2 final : public base::serialize::ISerializeJson {
+            protected:
+                const cpl::win32::api::ipv6::MIB_IPFORWARD_ROW2 *r{};
+                bool transferIPv6 = false;
+            public:
+                IpForwardRow2(
+                        const api::ipv6::MIB_IPFORWARD_ROW2 *r,
+                        bool transferIPv6 = false
+                ) : r(r), transferIPv6(transferIPv6) {
+
+                }
+
+                string ToJson() override {
+                    return std::string();
+                }
+
+                int32_t FromJson(const string &s) override {
+                    return ERROR_EMPTY;
+                }
+            };
+
+            class IpForwardTable2 final : public base::serialize::ISerializeJson {
+            protected:
+                const cpl::win32::api::ipv6::MIB_IPFORWARD_TABLE2 *t{};
+                bool transferIPv6 = false;
+            public:
+                IpForwardTable2(
+                        const api::ipv6::MIB_IPFORWARD_TABLE2 *t,
+                        bool transferIPv6
+                ) : t(t), transferIPv6(transferIPv6) {
+
+                }
+
+                string ToJson() override {
+                    return std::string();
+                }
+
+                int32_t FromJson(const string &s) override {
+                    return ERROR_EMPTY;
+                }
             };
         }
     }

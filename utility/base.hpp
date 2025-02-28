@@ -62,7 +62,7 @@ namespace cpl {
 
         public:
             static T &Instance(
-                const PCRITICAL_SECTION pCriticalSection = nullptr
+                    const PCRITICAL_SECTION pCriticalSection = nullptr
             ) {
                 // C++11实现方式自带锁，会导致不兼容XP
                 static T *instance = nullptr;
@@ -120,7 +120,7 @@ namespace cpl {
 
         public:
             static T &Instance(
-                const PCRITICAL_SECTION pCriticalSection = nullptr
+                    const PCRITICAL_SECTION pCriticalSection = nullptr
             ) {
                 // C++11实现方式自带锁，会导致不兼容XP
                 static T *instance = nullptr;
@@ -184,7 +184,13 @@ namespace cpl {
                 virtual ~ISerialize() = default;
             };
 
-            class ISerializeJson : public ISerialize {
+            class ISerializeJson {
+            public:
+                virtual std::string ToJson() = 0;
+
+                virtual int32_t FromJson(const std::string &s) = 0;
+
+                virtual ~ISerializeJson() = default;
             };
         }
 
