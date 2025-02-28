@@ -272,7 +272,7 @@ namespace cpl {
                     // this->ptrSysAdapter = a;
                 }
 
-                string Serialize() override {
+                string Serialize() const override {
                     vector<string> t{};
                     string s{};
 
@@ -350,7 +350,7 @@ namespace cpl {
                     this->ptrSysAdapter = a;
                 }
 
-                string Serialize() override {
+                string Serialize() const override {
                     for (auto pa = ptrSysAdapter; nullptr != pa; pa = pa->Next) {
                         Adapter adapter(pa);
                         const auto s = adapter.Serialize();
@@ -375,7 +375,7 @@ namespace cpl {
                     this->transferIPv4 = transferIPv4;
                 }
 
-                string Serialize() override {
+                string Serialize() const override {
                     vector<string> t{};
                     string s{};
                     s = strings::Format(R"("dwForwardDest":%lu)", r->dwForwardDest);
@@ -439,12 +439,12 @@ namespace cpl {
                     this->t = t;
                 }
 
-                string Serialize() override {
+                string Serialize() const override {
                     for (auto i = 0; i < t->dwNumEntries; i++) {
                         const auto &r = t->table[i];
-                        IpForwardRow raw = IpForwardRow(&r);
+                        auto raw = IpForwardRow(&r);
                         const auto s = raw.Serialize();
-                        vr.push_back(s);
+                        this->vr.push_back(s);
                     }
 
                     return string("[") + strings::Join(vr, ",") + "]";

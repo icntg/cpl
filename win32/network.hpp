@@ -14,6 +14,48 @@ using namespace std;
 
 namespace cpl {
     namespace win32 {
+        namespace display {
+            inline INT32 DumpBase64(string &out, const void *ptr, const size_t size) {
+                // todo
+                goto __FREE__;
+            __ERROR__:
+                PASS;
+            __FREE__:
+
+                return ERROR_SUCCESS;
+            }
+
+            inline INT32 Dump$IP_ADAPTER_INFO$JSON(string &out, const IP_ADAPTER_INFO *ip_adapter_info) {
+                // todo
+                return ERROR_SUCCESS;
+            }
+
+            inline INT32 Dump$IP_ADAPTER_INFOs$JSON(string &out, const IP_ADAPTER_INFO *ip_adapter_info) {
+                // todo
+                return ERROR_SUCCESS;
+            }
+
+            inline INT32 Dump$MIB_IPFORWARDROW$JSON(string &out, const MIB_IPFORWARDROW *route4) {
+                // todo
+                return ERROR_SUCCESS;
+            }
+
+            inline INT32 Dump$MIB_IPFORWARDTABLE$JSON(string &out, const MIB_IPFORWARDTABLE *route4) {
+                // todo
+                return ERROR_SUCCESS;
+            }
+
+            inline INT32 Dump$MIB_IPFORWARD_ROW2$JSON(string &out, const api::ipv6::MIB_IPFORWARD_ROW2 *route4) {
+                // todo
+                return ERROR_SUCCESS;
+            }
+
+            inline INT32 Dump$MIB_IPFORWARD_TABLE2$JSON(string &out, const api::ipv6::MIB_IPFORWARD_TABLE2 *route4) {
+                // todo
+                return ERROR_SUCCESS;
+            }
+        }
+
         namespace network {
             inline INT32 SendHTTP(
                 _Out_ string &out,
@@ -272,7 +314,6 @@ namespace cpl {
                     const string &secret,
                     const string &data
                 ) {
-
                     INT32 retCode = ERROR_SUCCESS;
                     string enc{};
                     retCode |= crypto::Win32Crypto.Encrypt(
