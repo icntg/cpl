@@ -38,3 +38,8 @@ build/
 
 .vscode/
 .idea/
+
+venv/
+.venv/
+*.pyc
+__pycache__/

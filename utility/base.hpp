@@ -9,6 +9,10 @@
 #define PASS do{}while(false)
 #endif
 
+#ifndef bzero
+#define bzero ZeroMemory
+#endif
+
 namespace cpl {
     namespace base {
         //单例模板
@@ -48,6 +52,8 @@ namespace cpl {
          */
         class IContext {
         public:
+            virtual bool IsLoaded() = 0;
+
             virtual int32_t Load() = 0;
 
             virtual int32_t Unload() = 0;
@@ -62,7 +68,7 @@ namespace cpl {
 
         public:
             static T &Instance(
-                    const PCRITICAL_SECTION pCriticalSection = nullptr
+                const PCRITICAL_SECTION pCriticalSection = nullptr
             ) {
                 // C++11实现方式自带锁，会导致不兼容XP
                 static T *instance = nullptr;
@@ -116,11 +122,14 @@ namespace cpl {
         template<typename T>
         class ISingletonContext : public Singleton<T>, IContext {
             T *_instance = nullptr;
+
+        protected:
             PCRITICAL_SECTION _pcs = nullptr;
 
         public:
             static T &Instance(
-                    const PCRITICAL_SECTION pCriticalSection = nullptr
+                const BOOL bAutoLoad = TRUE,
+                const PCRITICAL_SECTION pCriticalSection = nullptr
             ) {
                 // C++11实现方式自带锁，会导致不兼容XP
                 static T *instance = nullptr;
@@ -132,7 +141,9 @@ namespace cpl {
                         instance = new T();
                         instance->_pcs = pCriticalSection; // 记录一下，释放时使用。
                         instance->_instance = instance; // 记录一下，释放时使用。
-                        instance->Load();
+                        if (bAutoLoad) {
+                            instance->Load();
+                        }
                     }
                     if (nullptr != pCriticalSection) {
                         LeaveCriticalSection(pCriticalSection);
@@ -173,24 +184,31 @@ namespace cpl {
             ~ISingletonContext() override = default;
         };
 
-
         namespace serialize {
             class ISerialize {
             public:
-                virtual std::string Serialize() = 0;
+                virtual string Serialize() = 0;
 
-                virtual int32_t Deserialize(const std::string &s) = 0;
+                virtual int32_t Deserialize(const string &s) = 0;
 
                 virtual ~ISerialize() = default;
             };
 
-            class ISerializeJson {
+            class ISerializeJson : public ISerialize {
             public:
-                virtual std::string ToJson() = 0;
+                virtual string ToJson() = 0;
 
-                virtual int32_t FromJson(const std::string &s) = 0;
+                virtual int32_t FromJson(const string &s) = 0;
 
-                virtual ~ISerializeJson() = default;
+                string Serialize() override {
+                    return this->ToJson();
+                }
+
+                int32_t Deserialize(const string &s) override {
+                    return this->FromJson(s);
+                }
+
+                ~ISerializeJson() override = default;
             };
         }
 
@@ -203,21 +221,39 @@ namespace cpl {
             class ICallback {
             protected:
                 FilterType filterType{FilterType::NONE};
+                vector<int32_t> resultList{};
 
             public:
                 virtual ~ICallback() = default;
 
                 /**
                  * 根据返回值，如果成功，再根据 FilterType 判断是否需要继续。
-                 * @param obj
+                 * @param obj 遍历中的单个对象
                  * @return ERROR_SUCCESS / other
                  */
                 virtual int32_t Callback(_In_ T obj) = 0;
 
-                virtual bool ToBeContinued() = 0;
+                virtual bool ToBeContinued() {
+                    return true;
+                };
+
+                virtual vector<int32_t> GetResultList() {
+                    return this->resultList;
+                }
+            };
+
+            template<typename T, typename R>
+            class ICallbackReturn : public ICallback<T> {
+            public:
+                /**
+                 * 根据返回值，如果成功，再根据 FilterType 判断是否需要继续。
+                 * @param obj 遍历中的单个对象
+                 * @param results 可以存放该单个对象的结果
+                 * @return ERROR_SUCCESS / other
+                 */
+                virtual int32_t Callback(_In_ T obj, _Out_opt_ vector<R> *results) = 0;
             };
         }
-
 
         class ILogger {
         public:
@@ -250,6 +286,95 @@ namespace cpl {
 
             virtual void Fatal(const char *fmt, ...) = 0;
         };
+
+        namespace crypto {
+            class IRandom {
+            public:
+                virtual ~IRandom() = default;
+
+                virtual INT32 Rand(_In_ LPCVOID buffer, _In_ size_t size) = 0;
+
+                virtual vector<uint8_t> Rand(_In_ size_t size) {
+                    auto buffer = vector<uint8_t>();
+                    buffer.resize(size);
+                    this->Rand(buffer.data(), size);
+                    return buffer;
+                }
+            };
+
+            class IHash {
+            public:
+                virtual ~IHash() = default;
+
+                virtual INT32 Update(_In_ const vector<BYTE> &data) = 0;
+
+                virtual INT32 Summary(_Out_ vector<BYTE> &out) = 0;
+            };
+
+            class IAsync {
+            public:
+                virtual ~IAsync() = default;
+
+                virtual INT32 Encrypt(
+                    _Out_ vector<BYTE> &out,
+                    _In_ const vector<BYTE> &publicKey,
+                    _In_ const vector<BYTE> &cleared
+                ) = 0;
+
+                virtual INT32 Decrypt(
+                    _Out_ vector<BYTE> &out,
+                    _In_ const vector<BYTE> &privateKey,
+                    _In_ const vector<BYTE> &encrypted
+                ) = 0;
+
+                virtual INT32 Sign(
+                    _Out_ vector<BYTE> &out,
+                    _In_ const vector<BYTE> &privateKey,
+                    _In_ const vector<BYTE> &encrypted
+                ) = 0;
+
+                virtual INT32 Verify(
+                    _Out_ BOOL &out,
+                    _In_ const vector<BYTE> &publicKey,
+                    _In_ const vector<BYTE> &data
+                ) = 0;
+            };
+
+            class ISync {
+            public:
+                virtual ~ISync() = default;
+
+                virtual INT32 Encrypt(
+                    _Out_ vector<BYTE> &out,
+                    _In_ const vector<BYTE> &cleared
+                ) = 0;
+
+                virtual INT32 Decrypt(
+                    _Out_ vector<BYTE> &out,
+                    _In_ const vector<BYTE> &encrypted
+                ) = 0;
+            };
+
+            class ICryptoFactory {
+            public:
+                virtual ~ICryptoFactory() = default;
+
+                virtual INT32 CreateHMACProvider(
+                    _In_ const vector<BYTE> &key,
+                    _Out_ IHash *&out
+                ) = 0;
+
+                virtual INT32 CreateSyncProvider(
+                    _In_ const vector<BYTE> &key,
+                    _Out_ ISync *&out
+                ) = 0;
+            };
+
+            class ICrypto : public ISync {
+            public:
+
+            };
+        }
     }
 }
 

@@ -5,6 +5,8 @@
 #include <string>
 #include <cstdio>
 
+#include "api.hpp"
+
 using namespace std;
 
 namespace cpl {
@@ -126,7 +128,7 @@ namespace cpl {
             public:
                 virtual ~WindowsService() = default;
 
-                WindowsService(const wstring &serviceName, IServiceEventLoop *_wrapper) {
+                explicit WindowsService(const wstring &serviceName, IServiceEventLoop *_wrapper) {
                     this->serviceName = serviceName;
                     WindowsService::wrapper = _wrapper;
                     WindowsService::wrapper->mService = this;

@@ -2,10 +2,8 @@
 #define CPL_CRYPTO_HPP_SUPPORTER_VEHICLE_STRONG_GLIDER_MOTION_PATIENT_JOURNEY
 
 #include <cstdint>
+#include <process.h>
 #include <string>
-
-#include "../../ccl/utility/crypto/crypto.h"
-#include "../../ccl/vendor/logger/log.h"
 
 using namespace std;
 
@@ -13,13 +11,145 @@ namespace cpl {
     namespace crypto {
         typedef int32_t (*FuncRandomBuffer)(void *buffer, uint32_t size);
 
-        class Crypto {
+        class UnsafeRandom final : public base::crypto::IRandom {
+        public:
+            INT32 Rand(_In_ const LPCVOID buffer, _In_ const size_t size) override {
+                // 涉及参数：时间、栈地址、堆地址、PID
+                {
+                    static uint8_t *staticPointer = nullptr;
+                    const auto now = time(nullptr);
+                    const auto stackAddress = &now;
+                    const auto globalAddress = &staticPointer;
+                    staticPointer = new(nothrow) uint8_t();
+                    if (nullptr == staticPointer) {
+                        return ERROR_NOT_ENOUGH_MEMORY;
+                    }
+                    const auto heapAddress = staticPointer;
+                    delete staticPointer;
+                    uint64_t antiStackAddress{}, reverseGlobalAddress{};
+                    memmove(&antiStackAddress, &stackAddress, sizeof(stackAddress));
+                    memmove(&reverseGlobalAddress, &globalAddress, sizeof(globalAddress));
+                    antiStackAddress = ~antiStackAddress;
+                    // reverse 反转
+                    {
+                        const auto *ps = reinterpret_cast<uint8_t *>(globalAddress);
+                        auto *pd = reinterpret_cast<uint8_t *>(&reverseGlobalAddress);
+                        if (sizeof(globalAddress) == 8) {
+                            for (auto i = 0; i < 4; i++) {
+                                const auto b0 = *(ps + i);
+                                const auto b1 = *(ps + i + 4);
+                                *(pd + 4 - i) = b0 ^ b1;
+                            }
+                        }
+                        if (sizeof(globalAddress) == 4) {
+                            for (auto i = 0; i < 4; i++) {
+                                const auto b0 = *(ps + i);
+                                *(pd + 4 - i) = b0;
+                            }
+                        } else {
+                            for (auto i = 0; i < sizeof(globalAddress); i++) {
+                                const auto j = 4 - i % 4 - 1;
+                                *(pd + j) ^= *(ps + i);
+                            }
+                        }
+                    }
+                    const auto pid = static_cast<uint32_t>(_getpid());
+                    const uint32_t seed = static_cast<uint32_t>(now) ^ antiStackAddress ^ reverseGlobalAddress ^ pid;
+                    srand(seed);
+                }
+                uint8_t *p = nullptr;
+                memmove(&p, &buffer, sizeof(LPCVOID));
+                for (auto i = 0; i < size; i++) {
+                    const auto r = rand();
+                    *(p + i) = static_cast<uint8_t>(r & 0xff);
+                }
+                return ERROR_SUCCESS;
+            }
+        };
+
+        class RC4 final : public base::crypto::ISync {
         protected:
-            FuncRandomBuffer trueFuncRandomBuffer{};
+            uint8_t sBox[256]{};
 
         public:
-            explicit Crypto(const FuncRandomBuffer true_func_random_buffer = nullptr) {
-                this->trueFuncRandomBuffer = true_func_random_buffer;
+            explicit RC4(const vector<uint8_t> &key) {
+                for (auto i = 0; i < 256; i++) {
+                    sBox[i] = i;
+                }
+                size_t j = 0;
+                for (auto i = 0; i < 256; i++) {
+                    j = (j + sBox[i] + key[i % key.size()]) % 256;
+                    const auto b = sBox[i];
+                    sBox[i] = sBox[j];
+                    sBox[j] = b;
+                }
+            }
+
+            INT32 Encrypt(vector<BYTE> &out, const vector<BYTE> &cleared) override {
+                size_t i = 0, j = 0;
+                for (auto c: cleared) {
+                    i = (i + 1) % 256;
+                    j = (j + sBox[i]) % 256;
+                    const auto t = sBox[i];
+                    sBox[i] = sBox[j];
+                    sBox[j] = t;
+                    const auto k = sBox[(sBox[i] + sBox[j]) % 256];
+                    out.push_back(c ^ k);
+                }
+            }
+
+            INT32 Decrypt(vector<BYTE> &out, const vector<BYTE> &encrypted) override {
+                return Encrypt(out, encrypted);
+            }
+        };
+
+
+        class Crypto final : public base::crypto::ICrypto {
+        public:
+            constexpr auto HMAC_SIZE = 16;
+            constexpr auto IV_SIZE = 8;
+
+        protected:
+            vector<BYTE> key;
+            base::crypto::IHash *hashProvider{};
+            base::crypto::IHash *hmacProvider{};
+            base::crypto::ISync *syncProvider{};
+            base::crypto::IAsync *asyncProvider{};
+            base::crypto::IRandom *randomProvider{};
+
+        public:
+            explicit Crypto(
+                const vector<BYTE> &key,
+                base::crypto::IHash *hash,
+                base::crypto::IHash *hmac,
+                base::crypto::ISync *sync,
+                base::crypto::IAsync *async,
+                base::crypto::IRandom *random
+            ) {
+                this->hashProvider = hash;
+                this->hmacProvider = hmac;
+                this->syncProvider = sync;
+                this->asyncProvider = async;
+                this->randomProvider = random;
+                // 如果没有提供random，默认使用非安全随机数生成器。
+                if (nullptr == randomProvider) {
+                    static UnsafeRandom urandom;
+                    this->randomProvider = &urandom;
+                }
+                this->key = key;
+            }
+
+            INT32 Encrypt(vector<BYTE> &out, const vector<BYTE> &cleared) override {
+                if (nullptr == hmacProvider || nullptr == randomProvider || nullptr == syncProvider) {
+                    return ERROR_IMPLEMENTATION_LIMIT;
+                }
+                BYTE iv[IV_SIZE]{};
+                this->randomProvider->Rand(iv, IV_SIZE);
+
+            }
+
+            INT32 Decrypt(vector<BYTE> &out, const vector<BYTE> &encrypted) override {
+                return Encrypt(out, encrypted);
             }
 
             string RandomBuffer(const uint32_t size) const {
