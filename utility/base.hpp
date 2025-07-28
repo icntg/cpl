@@ -372,7 +372,90 @@ namespace cpl {
 
             class ICrypto : public ISync {
             public:
+                static INT32 EncodeLength(_Out_ vector<BYTE> &out, _In_ const int64_t length) {
+                    int32_t retCode = 0;
+                    // string s;
+                    static int64_t _max_ = 1;
+                    if (1 == _max_) {
+                        _max_ = _max_ << 42;
+                    }
+                    if (length < 0 || length >= _max_) {
+                        return EINVAL;
+                    }
+                    out.clear();
+                    if (length < 128) {
+                        out.push_back(static_cast<uint8_t>(length));
+                        return 0;
+                    }
+                    uint8_t buffer[8] = {};
+                    int idx = 0; {
+                        int64_t n = length;
 
+                        while (n > 0) {
+                            const int64_t fn = n & 0x3f;
+                            n = n >> 6;
+                            int64_t v = static_cast<uint8_t>((0x80 | fn) & 0xbf);
+                            buffer[idx] = v;
+                            idx++;
+                            const int64_t hlc = 8 - idx - 2;
+                            if (n >= (1 << hlc)) {
+                                continue;
+                            }
+                            const int64_t hh = ((1 << (idx + 1)) - 1) << (hlc + 1);
+                            const int64_t hb = hh | n;
+                            buffer[idx] = static_cast<uint8_t>(hb);
+                            idx++;
+                            break;
+                        }
+                    }
+                    if (idx > 6) {
+                        return EINVAL;
+                    }
+                    out.resize(idx);
+                    for (auto i = 0; i < idx; i++) {
+                        const auto j = idx - i - 1;
+                        out[j] = buffer[i];
+                    }
+                    return 0;
+                }
+
+                static INT32 DecodeLength(_Out_ uint64_t &out, _Out_ size_t &nBytes, _In_ const vector<BYTE> &stream) {
+                    if (stream.size() < 1) {
+                        return EADDRNOTAVAIL;
+                    }
+                    const uint8_t header = stream[0];
+                    if (stream[0] >> 7 == 0) {
+                        out = header;
+                        nBytes = 1;
+                        return 0;
+                    }
+                    size_t n = 0;
+                    for (size_t i = 0; i < 7; i++) {
+                        const size_t rn = 7 - i;
+                        if (((header >> rn) & 1u) == 0u) {
+                            n = i;
+                            break;
+                        }
+                    }
+                    if (n == 0) {
+                        return EINVAL;
+                    }
+                    if (stream.size() < n) {
+                        return EINVAL;
+                    }
+                    int64_t tail = 0;
+                    for (size_t i = 1; i < n; i++) {
+                        if (stream[i] >> 6 != 2) {
+                            return -static_cast<int64_t>(i) - 1;
+                        }
+                        tail = (tail << 6) | (stream[i] & 0x3f);
+                    }
+                    const uint8_t mask = (1 << (8 - n)) - 1;
+                    const int64_t offset = 6 * (n - 1);
+                    out = ((header & mask) << offset) | tail;
+                    nBytes = n;
+                    return 0;
+                }
             };
         }
     }

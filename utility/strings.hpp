@@ -47,7 +47,7 @@ namespace cpl {
             return nWritten;
         }
 
-        inline string Format(const TCHAR *tpl, ...) {
+        inline exception Format(const TCHAR *tpl, ...) {
             string out{};
             va_list args;
             va_start(args, tpl);

@@ -104,48 +104,96 @@ namespace cpl {
         };
 
 
-        class Crypto final : public base::crypto::ICrypto {
+        class RC4Crypto final : public base::crypto::ICrypto {
         public:
             constexpr auto HMAC_SIZE = 16;
             constexpr auto IV_SIZE = 8;
 
         protected:
             vector<BYTE> key;
-            base::crypto::IHash *hashProvider{};
-            base::crypto::IHash *hmacProvider{};
-            base::crypto::ISync *syncProvider{};
-            base::crypto::IAsync *asyncProvider{};
-            base::crypto::IRandom *randomProvider{};
+            base::crypto::ICryptoFactory &hmacFactory;
+            base::crypto::ICryptoFactory &syncFactory;
+            base::crypto::IRandom &randomProvider;
 
         public:
-            explicit Crypto(
+            explicit RC4Crypto(
                 const vector<BYTE> &key,
-                base::crypto::IHash *hash,
-                base::crypto::IHash *hmac,
-                base::crypto::ISync *sync,
-                base::crypto::IAsync *async,
-                base::crypto::IRandom *random
-            ) {
-                this->hashProvider = hash;
-                this->hmacProvider = hmac;
-                this->syncProvider = sync;
-                this->asyncProvider = async;
-                this->randomProvider = random;
-                // 如果没有提供random，默认使用非安全随机数生成器。
-                if (nullptr == randomProvider) {
-                    static UnsafeRandom urandom;
-                    this->randomProvider = &urandom;
-                }
+                base::crypto::ICryptoFactory &hmacFactory,
+                base::crypto::ICryptoFactory &syncFactory,
+                base::crypto::IRandom &randomProvider
+            ): hmacFactory(hmacFactory), syncFactory(syncFactory), randomProvider(randomProvider) {
                 this->key = key;
             }
 
             INT32 Encrypt(vector<BYTE> &out, const vector<BYTE> &cleared) override {
-                if (nullptr == hmacProvider || nullptr == randomProvider || nullptr == syncProvider) {
-                    return ERROR_IMPLEMENTATION_LIMIT;
-                }
-                BYTE iv[IV_SIZE]{};
-                this->randomProvider->Rand(iv, IV_SIZE);
+                INT32 retCode = ERROR_SUCCESS;
+                base::crypto::IHash *hmacEncProvider{}, *hmacKeyEncProvider{}, *hmacKeyMacProvider{};
+                //
+                try {
+                    BYTE iv[IV_SIZE]{};
+                    vector<BYTE> encKey{};
+                    vector<BYTE> macKey{};
+                    vector<BYTE> buffer{};
+                    // 初始化IV
+                    {
+                        const auto r00 = this->randomProvider.Rand(iv, IV_SIZE);
+                        if (r00 != ERROR_SUCCESS) {
+                            retCode = r00;
+                            throw exception("[x] randomProvider.Rand failed");
+                        }
+                    }
+                    // 初始化encKey与macKey
+                    {
+                        const auto iv0 = vector<BYTE>(iv, iv + IV_SIZE);
+                        const auto r00 = this->hmacFactory.CreateHMACProvider(iv0, hmacKeyEncProvider);
+                        if (r00 != ERROR_SUCCESS) {
+                            retCode = r00;
+                            throw exception("[x] hmacFactory.CreateHMACProvider failed");
+                        }
+                        const auto r01 = hmacKeyEncProvider->Update(key);
+                        if (r01 != ERROR_SUCCESS) {
+                            retCode = r01;
+                            throw exception("[x] hmacKeyEncProvider->Update failed");
+                        }
+                        const auto r02 = hmacKeyEncProvider->Summary(encKey);
+                        if (r02 != ERROR_SUCCESS) {
+                            retCode = r02;
+                            throw exception("[x] hmacKeyEncProvider->Summary failed");
+                        }
+                        const auto r03 = this->hmacFactory.CreateHMACProvider(key, hmacKeyMacProvider);
+                        if (r03 != ERROR_SUCCESS) {
+                            retCode = r03;
+                            throw exception("[x] hmacFactory.CreateHMACProvider failed");
+                        }
+                        const auto r04 = hmacKeyMacProvider->Update(iv0);
+                        if (r04 != ERROR_SUCCESS) {
+                            retCode = r04;
+                            throw exception("[x] hmacKeyMacProvider->Update failed");
+                        }
+                        const auto r05 = hmacKeyMacProvider->Summary(macKey);
+                        if (r05 != ERROR_SUCCESS) {
+                            retCode = r05;
+                            throw exception("[x] hmacKeyMacProvider->Summary failed");
+                        }
+                        const auto r06 = this->hmacFactory.CreateHMACProvider(key, hmacEncProvider);
+                        if (r06 != ERROR_SUCCESS) {
+                            retCode = r06;
+                            throw exception("[x] hmacFactory.CreateHMACProvider failed");
+                        }
+                    }
+                    // 加密
+                    {
+                        auto rc4 = RC4(encKey);
+                        const auto r00 = rc4.Encrypt(buffer, cleared);
 
+                    }
+                } catch (exception &e) {
+                    LOG_F(ERROR, "[x] %s", e.what());
+                }
+                delete hmacEncProvider;
+                delete hmacKeyEncProvider;
+                delete hmacKeyMacProvider;
+                return retCode;
             }
 
             INT32 Decrypt(vector<BYTE> &out, const vector<BYTE> &encrypted) override {
