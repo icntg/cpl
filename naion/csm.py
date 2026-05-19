@@ -8,28 +8,24 @@ Model:
 
 Packet format:
 - outer packet (both directions):
-  signature(64) | session_x25519_pk(32) | nonce(24) | ciphertext+mac
+  signature(64) | session_x25519_pk(32) | nonce(24) | mac(16) | ciphertext
 
 - client -> server plaintext before seal:
-  packet_meta(16) | client_ed25519_pk(32) | app_plaintext
+  client_ed25519_pk(32) | app_plaintext
 
 - server -> client plaintext before seal:
-  packet_meta(16) | app_plaintext
+  app_plaintext
 
 Cipher suite:
 - Ed25519 detached signature
 - X25519 shared key agreement
-- libsodium-compatible crypto_box / naion_box_easy
+- XChaCha20-Poly1305-IETF with session_x25519_pk as AAD
 """
 
 from __future__ import annotations
 
-import hashlib
-import struct
-import threading
-import time
 from dataclasses import dataclass
-from typing import Callable, Optional, Protocol, Tuple
+from typing import Optional, Tuple
 
 from nacl import bindings
 from nacl.exceptions import BadSignatureError, CryptoError
@@ -45,14 +41,10 @@ X_SK_BYTES = bindings.crypto_box_SECRETKEYBYTES
 NONCE_BYTES = bindings.crypto_box_NONCEBYTES
 MAC_BYTES = getattr(bindings, "crypto_box_MACBYTES", 16)
 
-PACKET_MAGIC = b"IFW1"
-PACKET_PROTOCOL_VERSION = 1
-PACKET_META_FORMAT = "<4sBBHQ"
-PACKET_META_BYTES = struct.calcsize(PACKET_META_FORMAT)
 MAX_UDP_DATAGRAM_BYTES = 1024
 PACKET_FIXED_OVERHEAD_BYTES = SIGN_BYTES + X_PK_BYTES + NONCE_BYTES + MAC_BYTES
-CLIENT_PACKET_FIXED_BYTES = PACKET_FIXED_OVERHEAD_BYTES + PACKET_META_BYTES + ED_PK_BYTES
-SERVER_PACKET_FIXED_BYTES = PACKET_FIXED_OVERHEAD_BYTES + PACKET_META_BYTES
+CLIENT_PACKET_FIXED_BYTES = PACKET_FIXED_OVERHEAD_BYTES + ED_PK_BYTES
+SERVER_PACKET_FIXED_BYTES = PACKET_FIXED_OVERHEAD_BYTES
 MAX_CLIENT_PAYLOAD_BYTES = MAX_UDP_DATAGRAM_BYTES - CLIENT_PACKET_FIXED_BYTES
 MAX_SERVER_PAYLOAD_BYTES = MAX_UDP_DATAGRAM_BYTES - SERVER_PACKET_FIXED_BYTES
 DEFAULT_REPLAY_RETENTION_MS = 5 * 60 * 1000
@@ -70,56 +62,12 @@ class InvalidPacket(CSMError):
     pass
 
 
-class InvalidMeta(CSMError):
-    pass
-
-
 class StateError(CSMError):
     pass
 
 
 class PayloadTooLarge(CSMError):
     pass
-
-
-class TimestampOutsideWindow(CSMError):
-    pass
-
-
-class ReplayDetected(CSMError):
-    pass
-
-
-class ReplayCache(Protocol):
-    def check_and_store(self, client_public_key: bytes, signature: bytes, timestamp_ms: int, now_ms: int) -> None:
-        ...
-
-
-class MemoryReplayCache:
-    def __init__(self, retention_ms: int = DEFAULT_REPLAY_RETENTION_MS) -> None:
-        self.retention_ms = retention_ms or DEFAULT_REPLAY_RETENTION_MS
-        self._entries: dict[bytes, int] = {}
-        self._lock = threading.Lock()
-
-    def check_and_store(self, client_public_key: bytes, signature: bytes, timestamp_ms: int, now_ms: int) -> None:
-        _ = timestamp_ms
-        key = hashlib.sha256(client_public_key + signature).digest()
-        with self._lock:
-            expired = [entry_key for entry_key, expiry in self._entries.items() if expiry <= now_ms]
-            for entry_key in expired:
-                self._entries.pop(entry_key, None)
-            expiry = self._entries.get(key)
-            if expiry is not None and expiry > now_ms:
-                raise ReplayDetected("replay detected")
-            self._entries[key] = now_ms + self.retention_ms
-
-
-@dataclass(frozen=True)
-class PacketMeta:
-    protocol_version: int = PACKET_PROTOCOL_VERSION
-    reserved: int = 0
-    flags: int = 0
-    timestamp_ms: int = 0
 
 
 def init() -> int:
@@ -145,41 +93,6 @@ def server_decrypt_max_plaintext_size(packet_len: int) -> int:
 def _ensure_size(name: str, value: bytes, expected: int) -> None:
     if len(value) != expected:
         raise CSMError(f"{name} size mismatch: got {len(value)}, expected {expected}")
-
-
-def _current_timestamp_ms(now_ms_provider: Optional[Callable[[], int]]) -> int:
-    if now_ms_provider is None:
-        return int(time.time_ns() // 1_000_000)
-    return int(now_ms_provider())
-
-
-def _new_packet_meta(now_ms_provider: Optional[Callable[[], int]]) -> PacketMeta:
-    return PacketMeta(timestamp_ms=_current_timestamp_ms(now_ms_provider))
-
-
-def _pack_packet_meta(meta: PacketMeta) -> bytes:
-    return struct.pack(
-        PACKET_META_FORMAT,
-        PACKET_MAGIC,
-        meta.protocol_version,
-        meta.reserved,
-        meta.flags,
-        meta.timestamp_ms,
-    )
-
-
-def _parse_packet_meta(buffer: bytes) -> Tuple[PacketMeta, bytes]:
-    if len(buffer) < PACKET_META_BYTES:
-        raise InvalidMeta("packet meta too short")
-    magic, protocol_version, reserved, flags, timestamp_ms = struct.unpack(
-        PACKET_META_FORMAT,
-        buffer[:PACKET_META_BYTES],
-    )
-    if magic != PACKET_MAGIC:
-        raise InvalidMeta("packet meta magic invalid")
-    if protocol_version != PACKET_PROTOCOL_VERSION:
-        raise InvalidMeta("packet meta version invalid")
-    return PacketMeta(protocol_version, reserved, flags, timestamp_ms), buffer[PACKET_META_BYTES:]
 
 
 def _sign_detached(message: bytes, ed_secret_key: bytes) -> bytes:
@@ -212,24 +125,71 @@ def _x25519_keypair() -> Tuple[bytes, bytes]:
     return bindings.crypto_box_keypair()
 
 
-def _seal(plaintext: bytes, peer_xpk: bytes, self_xsk: bytes) -> bytes:
+def _rotl32(value: int, bits: int) -> int:
+    return ((value << bits) & 0xFFFFFFFF) | (value >> (32 - bits))
+
+
+def _quarterround(state: list[int], a: int, b: int, c: int, d: int) -> None:
+    state[a] = (state[a] + state[b]) & 0xFFFFFFFF
+    state[d] = _rotl32(state[d] ^ state[a], 16)
+    state[c] = (state[c] + state[d]) & 0xFFFFFFFF
+    state[b] = _rotl32(state[b] ^ state[c], 12)
+    state[a] = (state[a] + state[b]) & 0xFFFFFFFF
+    state[d] = _rotl32(state[d] ^ state[a], 8)
+    state[c] = (state[c] + state[d]) & 0xFFFFFFFF
+    state[b] = _rotl32(state[b] ^ state[c], 7)
+
+
+def _hchacha20(key: bytes, nonce16: bytes) -> bytes:
+    _ensure_size("hchacha20_key", key, 32)
+    _ensure_size("hchacha20_nonce", nonce16, 16)
+    constants = b"expand 32-byte k"
+    words = [
+        int.from_bytes(constants[i : i + 4], "little")
+        for i in range(0, 16, 4)
+    ]
+    words.extend(int.from_bytes(key[i : i + 4], "little") for i in range(0, 32, 4))
+    words.extend(int.from_bytes(nonce16[i : i + 4], "little") for i in range(0, 16, 4))
+    for _ in range(10):
+        _quarterround(words, 0, 4, 8, 12)
+        _quarterround(words, 1, 5, 9, 13)
+        _quarterround(words, 2, 6, 10, 14)
+        _quarterround(words, 3, 7, 11, 15)
+        _quarterround(words, 0, 5, 10, 15)
+        _quarterround(words, 1, 6, 11, 12)
+        _quarterround(words, 2, 7, 8, 13)
+        _quarterround(words, 3, 4, 9, 14)
+    out_words = words[:4] + words[12:16]
+    return b"".join(word.to_bytes(4, "little") for word in out_words)
+
+
+def _derive_aead_key(peer_xpk: bytes, self_xsk: bytes) -> bytes:
+    shared = bindings.crypto_scalarmult(self_xsk, peer_xpk)
+    return _hchacha20(shared, b"\x00" * 16)
+
+
+def _seal(plaintext: bytes, peer_xpk: bytes, self_xsk: bytes, aad: bytes) -> bytes:
     if not plaintext:
         raise CSMError("seal plaintext is empty")
     nonce = random_bytes(NONCE_BYTES)
     _ensure_size("peer_xpk", peer_xpk, X_PK_BYTES)
     _ensure_size("self_xsk", self_xsk, X_SK_BYTES)
-    return nonce + bindings.crypto_box(plaintext, nonce, peer_xpk, self_xsk)
+    ekey = _derive_aead_key(peer_xpk, self_xsk)
+    encrypted = bindings.crypto_aead_xchacha20poly1305_ietf_encrypt(plaintext, aad, nonce, ekey)
+    return nonce + encrypted[-MAC_BYTES:] + encrypted[:-MAC_BYTES]
 
 
-def _open(nonce_cipher: bytes, peer_xpk: bytes, self_xsk: bytes) -> bytes:
+def _open(nonce_cipher: bytes, peer_xpk: bytes, self_xsk: bytes, aad: bytes) -> bytes:
     if len(nonce_cipher) <= NONCE_BYTES + MAC_BYTES:
         raise InvalidPacket("ciphertext too short")
     nonce = nonce_cipher[:NONCE_BYTES]
-    mac_ciphertext = nonce_cipher[NONCE_BYTES:]
+    mac = nonce_cipher[NONCE_BYTES : NONCE_BYTES + MAC_BYTES]
+    ciphertext = nonce_cipher[NONCE_BYTES + MAC_BYTES :]
     _ensure_size("peer_xpk", peer_xpk, X_PK_BYTES)
     _ensure_size("self_xsk", self_xsk, X_SK_BYTES)
     try:
-        return bindings.crypto_box_open(mac_ciphertext, nonce, peer_xpk, self_xsk)
+        ekey = _derive_aead_key(peer_xpk, self_xsk)
+        return bindings.crypto_aead_xchacha20poly1305_ietf_decrypt(ciphertext + mac, aad, nonce, ekey)
     except CryptoError as e:
         raise CSMError("open failed") from e
 
@@ -240,7 +200,6 @@ class Client:
     ed_secret_key: bytes
     ed_public_key: bytes
     server_ed_public_key: bytes
-    now_ms_provider: Optional[Callable[[], int]] = None
 
     @classmethod
     def create(cls, ed_seed_client: bytes, ed_public_key_server: bytes) -> "Client":
@@ -249,9 +208,6 @@ class Client:
         ed_public_key, ed_secret_key = bindings.crypto_sign_seed_keypair(ed_seed_client)
         return cls(ed_seed_client, ed_secret_key, ed_public_key, ed_public_key_server)
 
-    def set_now_ms_provider(self, now_ms_provider: Optional[Callable[[], int]]) -> None:
-        self.now_ms_provider = now_ms_provider
-
     def encrypt(self, plaintext: bytes) -> bytes:
         if not plaintext:
             raise CSMError("client encrypt empty data")
@@ -259,8 +215,8 @@ class Client:
             raise PayloadTooLarge("client payload exceeds UDP budget")
         server_xpk = _ed_pk_to_xpk(self.server_ed_public_key)
         session_xpk, session_xsk = _x25519_keypair()
-        payload = _pack_packet_meta(_new_packet_meta(self.now_ms_provider)) + self.ed_public_key + plaintext
-        nonce_cipher = _seal(payload, server_xpk, session_xsk)
+        payload = self.ed_public_key + plaintext
+        nonce_cipher = _seal(payload, server_xpk, session_xsk, session_xpk)
         body = session_xpk + nonce_cipher
         sig = _sign_detached(body, self.ed_secret_key)
         return sig + body
@@ -276,8 +232,7 @@ class Client:
         session_xpk = body[:X_PK_BYTES]
         nonce_cipher = body[X_PK_BYTES:]
         client_xsk = _ed_sk_to_xsk(self.ed_secret_key)
-        opened = _open(nonce_cipher, session_xpk, client_xsk)
-        _meta, plaintext = _parse_packet_meta(opened)
+        plaintext = _open(nonce_cipher, session_xpk, client_xsk, session_xpk)
         if not plaintext:
             raise InvalidPacket("client decrypt payload missing")
         return plaintext
@@ -289,9 +244,6 @@ class Server:
     ed_secret_key: bytes
     ed_public_key: bytes
     client_ed_public_key: Optional[bytes] = None
-    timestamp_window_ms: int = 0
-    replay_cache: Optional[ReplayCache] = None
-    now_ms_provider: Optional[Callable[[], int]] = None
 
     @classmethod
     def create(cls, ed_seed_server: bytes) -> "Server":
@@ -303,32 +255,6 @@ class Server:
     def client_public_key_initialized(self) -> bool:
         return self.client_ed_public_key is not None
 
-    def set_now_ms_provider(self, now_ms_provider: Optional[Callable[[], int]]) -> None:
-        self.now_ms_provider = now_ms_provider
-
-    def set_timestamp_window_ms(self, timestamp_window_ms: int) -> None:
-        self.timestamp_window_ms = max(0, int(timestamp_window_ms))
-
-    def set_replay_cache(self, replay_cache: Optional[ReplayCache]) -> None:
-        self.replay_cache = replay_cache
-
-    def _validate_timestamp(self, meta: PacketMeta) -> None:
-        if self.timestamp_window_ms <= 0:
-            return
-        now_ms = _current_timestamp_ms(self.now_ms_provider)
-        if abs(now_ms - meta.timestamp_ms) > self.timestamp_window_ms:
-            raise TimestampOutsideWindow("timestamp outside validation window")
-
-    def _check_replay(self, client_public_key: bytes, signature: bytes, timestamp_ms: int) -> None:
-        if self.replay_cache is None:
-            return
-        self.replay_cache.check_and_store(
-            client_public_key,
-            signature,
-            timestamp_ms,
-            _current_timestamp_ms(self.now_ms_provider),
-        )
-
     def decrypt(self, packet: bytes) -> bytes:
         min_size = CLIENT_PACKET_FIXED_BYTES
         if len(packet) <= min_size:
@@ -338,16 +264,13 @@ class Server:
         session_xpk = body[:X_PK_BYTES]
         nonce_cipher = body[X_PK_BYTES:]
         server_xsk = _ed_sk_to_xsk(self.ed_secret_key)
-        opened = _open(nonce_cipher, session_xpk, server_xsk)
-        meta, payload = _parse_packet_meta(opened)
-        if len(payload) <= ED_PK_BYTES:
+        opened = _open(nonce_cipher, session_xpk, server_xsk, session_xpk)
+        if len(opened) <= ED_PK_BYTES:
             raise InvalidPacket("server decrypt opened payload too short")
-        client_ed_pk = payload[:ED_PK_BYTES]
-        plaintext = payload[ED_PK_BYTES:]
+        client_ed_pk = opened[:ED_PK_BYTES]
+        plaintext = opened[ED_PK_BYTES:]
         if not _verify_detached(signature, body, client_ed_pk):
             raise VerifyFailed("server decrypt signature verify failed")
-        self._validate_timestamp(meta)
-        self._check_replay(client_ed_pk, signature, meta.timestamp_ms)
         self.client_ed_public_key = client_ed_pk
         return plaintext
 
@@ -361,8 +284,7 @@ class Server:
         assert self.client_ed_public_key is not None
         client_xpk = _ed_pk_to_xpk(self.client_ed_public_key)
         session_xpk, session_xsk = _x25519_keypair()
-        payload = _pack_packet_meta(_new_packet_meta(self.now_ms_provider)) + plaintext
-        nonce_cipher = _seal(payload, client_xpk, session_xsk)
+        nonce_cipher = _seal(plaintext, client_xpk, session_xsk, session_xpk)
         body = session_xpk + nonce_cipher
         sig = _sign_detached(body, self.ed_secret_key)
         return sig + body

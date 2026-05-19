@@ -224,17 +224,17 @@ namespace cpl {
             inline Result<std::tuple<uint32_t, uint32_t> > SplitAddressString(
                 _In_ const std::string &address
             ) {
-                const auto v = strings::Split(address, "/");
+                const auto v = strings::Split(strings::Trim(address), "/");
                 if (v.size() != 2) {
                     return Err(cpl::Error(Errors::AddressParse, "address format error" CPL_FILE_AND_LINE));
                 }
 
-                const auto hostRet = IPStringToUINT32(v[0], true);
+                const auto hostRet = IPStringToUINT32(strings::Trim(v[0]), true);
                 if (!hostRet.has_value()) {
                     return Err(hostRet.error());
                 }
 
-                const std::string &maskStr = v[1];
+                const std::string maskStr = strings::Trim(v[1]);
                 auto maskRet = IPStringToUINT32(maskStr, true);
                 if (!maskRet.has_value()) {
                     uint32_t n = 0;
@@ -287,7 +287,7 @@ namespace cpl {
                 }
 
                 int32_t SetSingleIP(_In_ const std::string &ip) {
-                    const auto r0 = IPStringToUINT32(ip, true);
+                    const auto r0 = IPStringToUINT32(strings::Trim(ip), true);
                     if (!r0.has_value()) {
                         return -1;
                     }
@@ -308,8 +308,8 @@ namespace cpl {
                 }
 
                 int32_t SetAddressRange(_In_ const std::string &ip1, _In_ const std::string &ip2) {
-                    const auto r0 = IPStringToUINT32(ip1, true);
-                    const auto r1 = IPStringToUINT32(ip2, true);
+                    const auto r0 = IPStringToUINT32(strings::Trim(ip1), true);
+                    const auto r1 = IPStringToUINT32(strings::Trim(ip2), true);
                     if (!r0.has_value() || !r1.has_value()) {
                         return -1;
                     }
@@ -335,7 +335,7 @@ namespace cpl {
                 }
 
                 int32_t SetAddressMask(_In_ const std::string &ip, _In_ const uint8_t mask) {
-                    const auto r1 = IPStringToUINT32(ip, true);
+                    const auto r1 = IPStringToUINT32(strings::Trim(ip), true);
                     if (!r1.has_value()) {
                         return -1;
                     }
@@ -350,14 +350,15 @@ namespace cpl {
                 }
 
                 int32_t SetAddressAny(_In_ const std::string &s) {
-                    if (s.empty()) {
+                    const auto value = strings::Trim(s);
+                    if (value.empty()) {
                         return -1;
                     }
 
                     int mode = 0;
                     size_t idx = 0;
-                    for (size_t i = 0; i < s.length(); i++) {
-                        const auto c = s.at(i);
+                    for (size_t i = 0; i < value.length(); i++) {
+                        const auto c = value.at(i);
                         if (c == '-' || c == '/' || c == '.' || c == ' ' || (c >= '0' && c <= '9')) {
                         } else {
                             return -static_cast<int32_t>(i) - 1;
@@ -375,17 +376,17 @@ namespace cpl {
                     }
 
                     if (mode == 0) {
-                        return SetSingleIP(s);
+                        return SetSingleIP(value);
                     }
                     if (mode == 1) {
-                        const auto ip1 = std::string(s.data(), idx);
-                        const auto ip2 = std::string(s.data() + idx + 1);
+                        const auto ip1 = std::string(value.data(), idx);
+                        const auto ip2 = std::string(value.data() + idx + 1);
                         return SetAddressRange(ip1, ip2);
                     }
 
-                    const auto ip = std::string(s.data(), idx);
+                    const auto ip = std::string(value.data(), idx);
                     uint32_t mask32 = 0;
-                    if (!ParseDecUInt32(std::string(s.data() + idx + 1), mask32) || mask32 > 255u) {
+                    if (!ParseDecUInt32(strings::Trim(std::string(value.data() + idx + 1)), mask32) || mask32 > 32u) {
                         return -5;
                     }
                     const auto mask = static_cast<uint8_t>(mask32);

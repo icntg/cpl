@@ -3,13 +3,9 @@ package naion
 import (
 	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/sha512"
-	"encoding/binary"
 	"errors"
 	"math/big"
-	"sync"
-	"time"
 
 	"golang.org/x/crypto/chacha20"
 	"golang.org/x/crypto/chacha20poly1305"
@@ -26,86 +22,27 @@ const (
 	NonceBytes  = chacha20poly1305.NonceSizeX
 	MACBytes    = 16
 
-	PacketMetaBytes       = 16
-	MaxUDPDatagramBytes   = 1024
-	PacketProtocolVersion = 1
-	packetMagic           = "IFW1"
+	MaxUDPDatagramBytes = 1024
 )
 
 const (
 	packetFixedOverheadBytes = SignBytes + XPKBytes + NonceBytes + MACBytes
-	clientPacketFixedBytes   = packetFixedOverheadBytes + PacketMetaBytes + EdPKBytes
-	serverPacketFixedBytes   = packetFixedOverheadBytes + PacketMetaBytes
+	clientPacketFixedBytes   = packetFixedOverheadBytes + EdPKBytes
+	serverPacketFixedBytes   = packetFixedOverheadBytes
 	MaxClientPayloadBytes    = MaxUDPDatagramBytes - clientPacketFixedBytes
 	MaxServerPayloadBytes    = MaxUDPDatagramBytes - serverPacketFixedBytes
-	defaultReplayRetentionMS = uint64(5 * 60 * 1000)
 )
 
 var (
-	ErrInvalidArgument        = errors.New("csm: invalid argument")
-	ErrBufferTooSmall         = errors.New("csm: buffer too small")
-	ErrCrypto                 = errors.New("csm: crypto failed")
-	ErrVerifyFailed           = errors.New("csm: verify failed")
-	ErrState                  = errors.New("csm: invalid state")
-	ErrNoData                 = errors.New("csm: empty data")
-	ErrPayloadTooLarge        = errors.New("csm: payload too large")
-	ErrInvalidPacket          = errors.New("csm: invalid packet")
-	ErrInvalidMeta            = errors.New("csm: invalid packet meta")
-	ErrTimestampOutsideWindow = errors.New("csm: timestamp outside window")
-	ErrReplayDetected         = errors.New("csm: replay detected")
+	ErrInvalidArgument = errors.New("csm: invalid argument")
+	ErrBufferTooSmall  = errors.New("csm: buffer too small")
+	ErrCrypto          = errors.New("csm: crypto failed")
+	ErrVerifyFailed    = errors.New("csm: verify failed")
+	ErrState           = errors.New("csm: invalid state")
+	ErrNoData          = errors.New("csm: empty data")
+	ErrPayloadTooLarge = errors.New("csm: payload too large")
+	ErrInvalidPacket   = errors.New("csm: invalid packet")
 )
-
-type PacketMeta struct {
-	ProtocolVersion uint8
-	Reserved        uint8
-	Flags           uint16
-	TimestampMS     uint64
-}
-
-type ReplayCache interface {
-	CheckAndStore(clientPublicKey, signature []byte, timestampMS, nowMS uint64) error
-}
-
-type MemoryReplayCache struct {
-	mu          sync.Mutex
-	retentionMS uint64
-	entries     map[[32]byte]uint64
-}
-
-func NewMemoryReplayCache(retention time.Duration) *MemoryReplayCache {
-	retentionMS := uint64(retention / time.Millisecond)
-	if retentionMS == 0 {
-		retentionMS = defaultReplayRetentionMS
-	}
-	return &MemoryReplayCache{
-		retentionMS: retentionMS,
-		entries:     make(map[[32]byte]uint64),
-	}
-}
-
-func (c *MemoryReplayCache) CheckAndStore(clientPublicKey, signature []byte, timestampMS, nowMS uint64) error {
-	if c == nil {
-		return ErrInvalidArgument
-	}
-	_ = timestampMS
-	key := replayKey(clientPublicKey, signature)
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	for k, expiry := range c.entries {
-		if expiry <= nowMS {
-			delete(c.entries, k)
-		}
-	}
-
-	if expiry, ok := c.entries[key]; ok && expiry > nowMS {
-		return ErrReplayDetected
-	}
-
-	c.entries[key] = nowMS + c.retentionMS
-	return nil
-}
 
 func Init() int { return 0 }
 
@@ -142,7 +79,6 @@ type Client struct {
 	edSecretKey       ed25519.PrivateKey
 	edPublicKey       ed25519.PublicKey
 	serverEdPublicKey ed25519.PublicKey
-	nowFunc           func() time.Time
 }
 
 type Server struct {
@@ -151,9 +87,6 @@ type Server struct {
 	edPublicKey           ed25519.PublicKey
 	clientEdPublicKey     ed25519.PublicKey
 	clientPublicKeyInited bool
-	timestampWindowMS     uint64
-	replayCache           ReplayCache
-	nowFunc               func() time.Time
 }
 
 func NewClient(edSeedClient []byte, edPublicKeyServer []byte) (*Client, error) {
@@ -173,7 +106,6 @@ func NewClient(edSeedClient []byte, edPublicKeyServer []byte) (*Client, error) {
 		edSecretKey:       edSecretKey,
 		edPublicKey:       append(ed25519.PublicKey(nil), edPublicKey...),
 		serverEdPublicKey: append(ed25519.PublicKey(nil), serverPK...),
-		nowFunc:           time.Now,
 	}, nil
 }
 
@@ -189,48 +121,7 @@ func NewServer(edSeedServer []byte) (*Server, error) {
 		edSeed:      seed,
 		edSecretKey: edSecretKey,
 		edPublicKey: append(ed25519.PublicKey(nil), edPublicKey...),
-		nowFunc:     time.Now,
 	}, nil
-}
-
-func (c *Client) SetNowFunc(fn func() time.Time) {
-	if c == nil {
-		return
-	}
-	if fn == nil {
-		c.nowFunc = time.Now
-		return
-	}
-	c.nowFunc = fn
-}
-
-func (s *Server) SetNowFunc(fn func() time.Time) {
-	if s == nil {
-		return
-	}
-	if fn == nil {
-		s.nowFunc = time.Now
-		return
-	}
-	s.nowFunc = fn
-}
-
-func (s *Server) SetTimestampWindow(window time.Duration) {
-	if s == nil {
-		return
-	}
-	if window <= 0 {
-		s.timestampWindowMS = 0
-		return
-	}
-	s.timestampWindowMS = uint64(window / time.Millisecond)
-}
-
-func (s *Server) SetReplayCache(cache ReplayCache) {
-	if s == nil {
-		return
-	}
-	s.replayCache = cache
 }
 
 func (c *Client) Encrypt(plaintext []byte) ([]byte, error) {
@@ -252,12 +143,11 @@ func (c *Client) Encrypt(plaintext []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	payload := make([]byte, 0, PacketMetaBytes+EdPKBytes+len(plaintext))
-	payload = append(payload, marshalPacketMeta(newPacketMeta(currentTimestampMS(c.nowFunc)))...)
+	payload := make([]byte, 0, EdPKBytes+len(plaintext))
 	payload = append(payload, c.edPublicKey...)
 	payload = append(payload, plaintext...)
 
-	sealed, err := seal(payload, serverXPK, sessionXSK)
+	sealed, err := seal(payload, serverXPK, sessionXSK, sessionXPK[:])
 	if err != nil {
 		return nil, err
 	}
@@ -289,18 +179,14 @@ func (c *Client) Decrypt(packet []byte) ([]byte, error) {
 	copy(sessionXPK[:], body[:XPKBytes])
 	nonceCipher := body[XPKBytes:]
 	clientXSK := edSecretToCurve25519(c.edSecretKey)
-	opened, err := openBox(nonceCipher, &sessionXPK, &clientXSK)
+	opened, err := openBox(nonceCipher, &sessionXPK, &clientXSK, sessionXPK[:])
 	if err != nil {
 		return nil, err
 	}
-	_, payload, err := parsePacketMeta(opened)
-	if err != nil {
-		return nil, err
-	}
-	if len(payload) == 0 {
+	if len(opened) == 0 {
 		return nil, ErrInvalidPacket
 	}
-	return append([]byte(nil), payload...), nil
+	return append([]byte(nil), opened...), nil
 }
 
 func (s *Server) Decrypt(packet []byte) ([]byte, error) {
@@ -317,29 +203,19 @@ func (s *Server) Decrypt(packet []byte) ([]byte, error) {
 	copy(sessionXPK[:], body[:XPKBytes])
 	nonceCipher := body[XPKBytes:]
 	serverXSK := edSecretToCurve25519(s.edSecretKey)
-	opened, err := openBox(nonceCipher, &sessionXPK, &serverXSK)
+	opened, err := openBox(nonceCipher, &sessionXPK, &serverXSK, sessionXPK[:])
 	if err != nil {
 		return nil, err
 	}
 
-	meta, payload, err := parsePacketMeta(opened)
-	if err != nil {
-		return nil, err
-	}
-	if len(payload) <= EdPKBytes {
+	if len(opened) <= EdPKBytes {
 		return nil, ErrInvalidPacket
 	}
 
-	clientEDPK := append([]byte(nil), payload[:EdPKBytes]...)
-	plaintext := append([]byte(nil), payload[EdPKBytes:]...)
+	clientEDPK := append([]byte(nil), opened[:EdPKBytes]...)
+	plaintext := append([]byte(nil), opened[EdPKBytes:]...)
 	if !ed25519.Verify(clientEDPK, body, signature) {
 		return nil, ErrVerifyFailed
-	}
-	if err := s.validateTimestamp(meta); err != nil {
-		return nil, err
-	}
-	if err := s.checkReplay(clientEDPK, signature, meta.TimestampMS); err != nil {
-		return nil, err
 	}
 	s.clientEdPublicKey = clientEDPK
 	s.clientPublicKeyInited = true
@@ -368,11 +244,7 @@ func (s *Server) Encrypt(plaintext []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	payload := make([]byte, 0, PacketMetaBytes+len(plaintext))
-	payload = append(payload, marshalPacketMeta(newPacketMeta(currentTimestampMS(s.nowFunc)))...)
-	payload = append(payload, plaintext...)
-
-	sealed, err := seal(payload, clientXPK, sessionXSK)
+	sealed, err := seal(plaintext, clientXPK, sessionXSK, sessionXPK[:])
 	if err != nil {
 		return nil, err
 	}
@@ -390,6 +262,13 @@ func (s *Server) ClientPublicKeyInitialized() bool {
 	return s != nil && s.clientPublicKeyInited
 }
 
+func (s *Server) ClientEdPublicKey() []byte {
+	if s == nil || !s.clientPublicKeyInited {
+		return nil
+	}
+	return append([]byte(nil), s.clientEdPublicKey...)
+}
+
 func (c *Client) EdPublicKey() []byte {
 	if c == nil {
 		return nil
@@ -402,42 +281,6 @@ func (s *Server) EdPublicKey() []byte {
 		return nil
 	}
 	return append([]byte(nil), s.edPublicKey...)
-}
-
-func newPacketMeta(nowMS uint64) PacketMeta {
-	return PacketMeta{
-		ProtocolVersion: PacketProtocolVersion,
-		TimestampMS:     nowMS,
-	}
-}
-
-func marshalPacketMeta(meta PacketMeta) []byte {
-	out := make([]byte, PacketMetaBytes)
-	copy(out[:4], []byte(packetMagic))
-	out[4] = meta.ProtocolVersion
-	out[5] = meta.Reserved
-	binary.LittleEndian.PutUint16(out[6:8], meta.Flags)
-	binary.LittleEndian.PutUint64(out[8:16], meta.TimestampMS)
-	return out
-}
-
-func parsePacketMeta(buffer []byte) (PacketMeta, []byte, error) {
-	if len(buffer) < PacketMetaBytes {
-		return PacketMeta{}, nil, ErrInvalidMeta
-	}
-	if string(buffer[:4]) != packetMagic {
-		return PacketMeta{}, nil, ErrInvalidMeta
-	}
-	meta := PacketMeta{
-		ProtocolVersion: buffer[4],
-		Reserved:        buffer[5],
-		Flags:           binary.LittleEndian.Uint16(buffer[6:8]),
-		TimestampMS:     binary.LittleEndian.Uint64(buffer[8:16]),
-	}
-	if meta.ProtocolVersion != PacketProtocolVersion {
-		return PacketMeta{}, nil, ErrInvalidMeta
-	}
-	return meta, buffer[PacketMetaBytes:], nil
 }
 
 func generateX25519Keypair() (*[XPKBytes]byte, *[XSKBytes]byte, error) {
@@ -455,7 +298,7 @@ func generateX25519Keypair() (*[XPKBytes]byte, *[XSKBytes]byte, error) {
 	return &pk, &sk, nil
 }
 
-func seal(plaintext []byte, peerXPK *[XPKBytes]byte, selfXSK *[XSKBytes]byte) ([]byte, error) {
+func seal(plaintext []byte, peerXPK *[XPKBytes]byte, selfXSK *[XSKBytes]byte, aad []byte) ([]byte, error) {
 	if len(plaintext) == 0 || peerXPK == nil || selfXSK == nil {
 		return nil, ErrInvalidArgument
 	}
@@ -471,7 +314,7 @@ func seal(plaintext []byte, peerXPK *[XPKBytes]byte, selfXSK *[XSKBytes]byte) ([
 	if err != nil {
 		return nil, ErrCrypto
 	}
-	ciphertextAndTag := aead.Seal(nil, nonce[:], plaintext, nil)
+	ciphertextAndTag := aead.Seal(nil, nonce[:], plaintext, aad)
 	out := make([]byte, 0, NonceBytes+len(ciphertextAndTag))
 	out = append(out, nonce[:]...)
 	out = append(out, ciphertextAndTag[len(ciphertextAndTag)-MACBytes:]...)
@@ -479,7 +322,7 @@ func seal(plaintext []byte, peerXPK *[XPKBytes]byte, selfXSK *[XSKBytes]byte) ([
 	return out, nil
 }
 
-func openBox(nonceCipher []byte, peerXPK *[XPKBytes]byte, selfXSK *[XSKBytes]byte) ([]byte, error) {
+func openBox(nonceCipher []byte, peerXPK *[XPKBytes]byte, selfXSK *[XSKBytes]byte, aad []byte) ([]byte, error) {
 	if len(nonceCipher) <= NonceBytes+MACBytes || peerXPK == nil || selfXSK == nil {
 		return nil, ErrInvalidArgument
 	}
@@ -497,7 +340,7 @@ func openBox(nonceCipher []byte, peerXPK *[XPKBytes]byte, selfXSK *[XSKBytes]byt
 	combined := make([]byte, 0, len(macCiphertext))
 	combined = append(combined, macCiphertext[MACBytes:]...)
 	combined = append(combined, macCiphertext[:MACBytes]...)
-	opened, err := aead.Open(nil, nonce[:], combined, nil)
+	opened, err := aead.Open(nil, nonce[:], combined, aad)
 	if err != nil {
 		return nil, ErrCrypto
 	}
@@ -578,42 +421,4 @@ func reverse(b []byte) {
 	for i, j := 0, len(b)-1; i < j; i, j = i+1, j-1 {
 		b[i], b[j] = b[j], b[i]
 	}
-}
-
-func currentTimestampMS(nowFn func() time.Time) uint64 {
-	if nowFn == nil {
-		nowFn = time.Now
-	}
-	return uint64(nowFn().UnixMilli())
-}
-
-func (s *Server) validateTimestamp(meta PacketMeta) error {
-	if s == nil || s.timestampWindowMS == 0 {
-		return nil
-	}
-	nowMS := currentTimestampMS(s.nowFunc)
-	var diff uint64
-	if nowMS >= meta.TimestampMS {
-		diff = nowMS - meta.TimestampMS
-	} else {
-		diff = meta.TimestampMS - nowMS
-	}
-	if diff > s.timestampWindowMS {
-		return ErrTimestampOutsideWindow
-	}
-	return nil
-}
-
-func (s *Server) checkReplay(clientPublicKey, signature []byte, timestampMS uint64) error {
-	if s == nil || s.replayCache == nil {
-		return nil
-	}
-	return s.replayCache.CheckAndStore(clientPublicKey, signature, timestampMS, currentTimestampMS(s.nowFunc))
-}
-
-func replayKey(clientPublicKey, signature []byte) [32]byte {
-	buf := make([]byte, 0, len(clientPublicKey)+len(signature))
-	buf = append(buf, clientPublicKey...)
-	buf = append(buf, signature...)
-	return sha256.Sum256(buf)
 }

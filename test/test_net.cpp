@@ -147,6 +147,27 @@ TEST_SUITE("Net AddressRange") {
         CHECK_EQ(r2.SetAddressAny("10.1.2.3/24"), 0);
         CHECK_EQ(r2.GetStartString(), std::string("10.1.2.0"));
         CHECK_EQ(r2.GetEndString(), std::string("10.1.2.255"));
+
+        AddressRange r3;
+        CHECK_EQ(r3.SetAddressAny(" 22.49.7.107/25 "), 0);
+        CHECK_EQ(r3.GetStartString(), std::string("22.49.7.0"));
+        CHECK_EQ(r3.GetEndString(), std::string("22.49.7.127"));
+
+        const auto ip105 = IPStringToUINT32("22.49.7.105");
+        const auto ip106 = IPStringToUINT32("22.49.7.106");
+        const auto ip107 = IPStringToUINT32("22.49.7.107");
+        const auto ip200 = IPStringToUINT32("22.49.7.200");
+        REQUIRE(ip105.has_value());
+        REQUIRE(ip106.has_value());
+        REQUIRE(ip107.has_value());
+        REQUIRE(ip200.has_value());
+        CHECK(r3.IsAddressIn(ip105.value()));
+        CHECK(r3.IsAddressIn(ip106.value()));
+        CHECK(r3.IsAddressIn(ip107.value()));
+        CHECK_FALSE(r3.IsAddressIn(ip200.value()));
+
+        AddressRange r4;
+        CHECK_NE(r4.SetAddressAny("22.49.7.107/33"), 0);
     }
 
     TEST_CASE("SetAddressAny with dhcp flag") {

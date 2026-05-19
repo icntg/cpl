@@ -19,6 +19,7 @@
 # Fortran module files
 *.mod
 *.smod
+!go.mod
 
 # Compiled Static libraries
 *.lai
@@ -43,3 +44,5 @@ venv/
 .venv/
 *.pyc
 __pycache__/
+
+naion/test/
