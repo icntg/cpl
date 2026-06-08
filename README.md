@@ -1,2 +1,0 @@
-# cpl
-common cpp library
