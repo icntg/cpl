@@ -1396,7 +1396,7 @@ ed25519_sc_is_canonical(const unsigned char s[32])
 /* ------------------------------------------------------------------------- */
 
 typedef int64_t _naion_i64;
-typedef _naion_i64 _naion_gf[16];
+typedef int32_t _naion_gf[16];
 
 static void
 _naion_x25519_set(_naion_gf dst, const _naion_gf src)
@@ -1434,8 +1434,8 @@ _naion_x25519_carry(_naion_gf o)
     for (i = 0; i < 16; i++) {
         o[i] += (_naion_i64) 1 << 16;
         c = o[i] >> 16;
-        o[(i + 1) * (i < 15)] += c - 1 + 37 * (c - 1) * (i == 15);
-        o[i] -= c << 16;
+        o[(i + 1) * (i < 15)] += (int32_t) (c - 1 + 37 * (c - 1) * (i == 15));
+        o[i] -= (int32_t) (c << 16);
     }
 }
 
@@ -1499,25 +1499,49 @@ _naion_x25519_unpack(_naion_gf o, const uint8_t n[32])
 static void
 _naion_x25519_mul(_naion_gf o, const _naion_gf a, const _naion_gf b)
 {
+    /*
+     * Field elements live in 32-bit limbs (see _naion_gf typedef).  The
+     * convolution below accumulates into 64-bit temporaries so the products
+     * never lose precision; only once a limb has been fully reduced back into
+     * the 16-bit working range do we store it into the 32-bit element.
+     *
+     * Writing the raw 64-bit accumulator straight into a 32-bit limb would
+     * truncate it modulo 2**32, which is *not* a reduction modulo 2**255-19,
+     * so the subsequent carry passes could not repair it.  We therefore run
+     * the carry chain on the 64-bit buffer first, and only then demote each
+     * limb to _naion_gf.
+     */
     _naion_i64 t[31];
+    _naion_i64 c;
     int        i;
     int        j;
 
     memset(t, 0, sizeof t);
     for (i = 0; i < 16; i++) {
         for (j = 0; j < 16; j++) {
-            t[i + j] += a[i] * b[j];
+            t[i + j] += (_naion_i64) a[i] * (_naion_i64) b[j];
         }
     }
     for (i = 0; i < 15; i++) {
         t[i] += 38 * t[i + 16];
     }
-    for (i = 0; i < 16; i++) {
-        o[i] = t[i];
+    /*
+     * Reduce the 16-limb result in place (on the 64-bit buffer) so every limb
+     * fits comfortably inside int32 before it is stored.  Three passes match
+     * the original TweetNaCl contract and keep the canonical range; the loop
+     * is identical to _naion_x25519_carry but operates on int64 storage.
+     */
+    for (j = 0; j < 3; j++) {
+        for (i = 0; i < 16; i++) {
+            t[i] += (_naion_i64) 1 << 16;
+            c = t[i] >> 16;
+            t[(i + 1) * (i < 15)] += c - 1 + 37 * (c - 1) * (i == 15);
+            t[i] -= c << 16;
+        }
     }
-    _naion_x25519_carry(o);
-    _naion_x25519_carry(o);
-    _naion_x25519_carry(o);
+    for (i = 0; i < 16; i++) {
+        o[i] = (int32_t) t[i];
+    }
 }
 
 static void
