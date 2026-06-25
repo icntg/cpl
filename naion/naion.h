@@ -1517,6 +1517,7 @@ _naion_x25519_mul(_naion_gf o, const _naion_gf a, const _naion_gf b)
     }
     _naion_x25519_carry(o);
     _naion_x25519_carry(o);
+    _naion_x25519_carry(o);
 }
 
 static void
