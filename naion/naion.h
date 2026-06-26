@@ -8,9 +8,75 @@
 extern "C" {
 #endif
 
-#define NAION_VERSION_STRING "naion/0.1"
+#define NAION_VERSION_STRING "naion/0.2"
+
+/* ========================================================================= */
+/* Layer / feature selection macros                                          */
+/* ========================================================================= */
+/*
+ * Naion is organised into four progressively-built layers, plus an optional
+ * XSalsa20 family. Layers default to ON; defining any upper layer implicitly
+ * enables everything it depends on.
+ *
+ *   Layer 1 (NAION_LAYER_SYMM)     XChaCha20 stream + BLAKE2b hash + RNG
+ *       v depends on
+ *   Layer 2 (NAION_LAYER_AEAD)     XChaCha20-Poly1305 AEAD-IETF + secretbox
+ *       v depends on
+ *   Layer 3 (NAION_LAYER_CSM)      Ed25519 + X25519 + Box + CSM
+ *       v depends on
+ *   Layer 4 (NAION_LAYER_CSM_CA)   CSM + CA-certificate handshake
+ *       v depends on
+ *   Layer 5 (NAION_LAYER_CSM_SESSION) CSM with ephemeral-ephemeral session DH
+ *                                     (full forward secrecy per session)
+ *
+ *   NAION_XSALSA20 (default 0)     Salsa20 core + XSalsa20 secretbox/box +
+ *                                  runtime gUseXChaCha20 dispatch
+ *
+ * All macros must be defined before #include "naion.h" to take effect.
+ */
+#ifndef NAION_LAYER_SYMM
+#define NAION_LAYER_SYMM 1
+#endif
+#ifndef NAION_LAYER_AEAD
+#define NAION_LAYER_AEAD 1
+#endif
+#ifndef NAION_LAYER_CSM
+#define NAION_LAYER_CSM 1
+#endif
+#ifndef NAION_LAYER_CSM_CA
+#define NAION_LAYER_CSM_CA 1
+#endif
+#ifndef NAION_LAYER_CSM_SESSION
+#define NAION_LAYER_CSM_SESSION 1
+#endif
+#ifndef NAION_XSALSA20
+#define NAION_XSALSA20 0
+#endif
+
+/* Upper layers force their prerequisites on. */
+#if NAION_LAYER_AEAD && !NAION_LAYER_SYMM
+#undef  NAION_LAYER_SYMM
+#define NAION_LAYER_SYMM 1
+#endif
+#if NAION_LAYER_CSM && !NAION_LAYER_AEAD
+#undef  NAION_LAYER_AEAD
+#define NAION_LAYER_AEAD 1
+#endif
+#if NAION_LAYER_CSM_CA && !NAION_LAYER_CSM
+#undef  NAION_LAYER_CSM
+#define NAION_LAYER_CSM 1
+#endif
+#if NAION_LAYER_CSM_SESSION && !NAION_LAYER_CSM_CA
+#undef  NAION_LAYER_CSM_CA
+#define NAION_LAYER_CSM_CA 1
+#endif
 
 typedef void (*naion_random_provider_fn)(void * const buf, const size_t size);
+
+/* ========================================================================= */
+/* Layer 1 — NAION_LAYER_SYMM (hash + stream cipher + RNG)                   */
+/* ========================================================================= */
+#if NAION_LAYER_SYMM
 
 /* caller-provided randomness provider; must match randombytes_buf prototype */
 void naion_set_random_provider(naion_random_provider_fn provider);
@@ -74,6 +140,16 @@ int naion_stream_xchacha20_xor_ic(unsigned char *c, const unsigned char *m,
                                    const unsigned char *n, uint64_t ic,
                                    const unsigned char *k);
 
+<<<<<<< HEAD
+=======
+#endif /* NAION_LAYER_SYMM */
+
+/* ========================================================================= */
+/* Layer 2 — NAION_LAYER_AEAD (AEAD-IETF + secretbox + symmetric box core)  */
+/* ========================================================================= */
+#if NAION_LAYER_AEAD
+
+>>>>>>> dev-merge
 /* ------------------------------------------------------------------------- */
 /* XChaCha20-Poly1305 (IETF) */
 /* ------------------------------------------------------------------------- */
@@ -153,6 +229,10 @@ int naion_secretbox_xchacha20poly1305_open_detached(unsigned char *m,
 /* ------------------------------------------------------------------------- */
 /* secretbox (XSalsa20-Poly1305 compatible names) */
 /* ------------------------------------------------------------------------- */
+<<<<<<< HEAD
+=======
+#if NAION_XSALSA20
+>>>>>>> dev-merge
 #define naion_secretbox_xsalsa20poly1305_KEYBYTES naion_secretbox_xchacha20poly1305_KEYBYTES
 #define naion_secretbox_xsalsa20poly1305_NONCEBYTES naion_secretbox_xchacha20poly1305_NONCEBYTES
 #define naion_secretbox_xsalsa20poly1305_MACBYTES naion_secretbox_xchacha20poly1305_MACBYTES
@@ -182,6 +262,38 @@ int naion_secretbox_xsalsa20poly1305_open_detached(unsigned char *m,
                                                     unsigned long long clen,
                                                     const unsigned char *n,
                                                     const unsigned char *k);
+<<<<<<< HEAD
+=======
+#endif /* NAION_XSALSA20 */
+
+/* ------------------------------------------------------------------------- */
+/* Box symmetric core (shared engine for secretbox + asymmetric box).
+ * The *_afternm / *_open_easy_afternm entry points are pure symmetric
+ * authenticated encryption: they consume a precomputed 32-byte key and a
+ * 24-byte nonce, with no Curve25519 work. secretbox delegates to them, so they
+ * live at the AEAD layer even though the asymmetric box wrappers below (which
+ * add X25519 key agreement) require Layer 3. */
+/* ------------------------------------------------------------------------- */
+
+#define naion_box_curve25519xchacha20poly1305_BEFORENMBYTES 32U
+#define naion_box_curve25519xchacha20poly1305_NONCEBYTES 24U
+#define naion_box_curve25519xchacha20poly1305_MACBYTES 16U
+
+int naion_box_curve25519xchacha20poly1305_easy_afternm(
+    unsigned char *c, const unsigned char *m, unsigned long long mlen,
+    const unsigned char *n, const unsigned char *k);
+
+int naion_box_curve25519xchacha20poly1305_open_easy_afternm(
+    unsigned char *m, const unsigned char *c, unsigned long long clen,
+    const unsigned char *n, const unsigned char *k);
+
+#endif /* NAION_LAYER_AEAD */
+
+/* ========================================================================= */
+/* Layer 3 — NAION_LAYER_CSM (X25519/KX/Box + Ed25519 + CSM)                */
+/* ========================================================================= */
+#if NAION_LAYER_CSM
+>>>>>>> dev-merge
 
 /* ------------------------------------------------------------------------- */
 /* X25519 key exchange + box */
@@ -220,9 +332,12 @@ int naion_kx_server_session_keys(unsigned char *rx, unsigned char *tx,
 #define naion_box_curve25519xchacha20poly1305_SEEDBYTES 32U
 #define naion_box_curve25519xchacha20poly1305_PUBLICKEYBYTES 32U
 #define naion_box_curve25519xchacha20poly1305_SECRETKEYBYTES 32U
+<<<<<<< HEAD
 #define naion_box_curve25519xchacha20poly1305_BEFORENMBYTES 32U
 #define naion_box_curve25519xchacha20poly1305_NONCEBYTES 24U
 #define naion_box_curve25519xchacha20poly1305_MACBYTES 16U
+=======
+>>>>>>> dev-merge
 #define naion_box_curve25519xchacha20poly1305_SEALBYTES \
     (naion_box_curve25519xchacha20poly1305_PUBLICKEYBYTES + \
      naion_box_curve25519xchacha20poly1305_MACBYTES)
@@ -248,6 +363,7 @@ int naion_box_curve25519xchacha20poly1305_open_easy(
     unsigned char *m, const unsigned char *c, unsigned long long clen,
     const unsigned char *n, const unsigned char *pk, const unsigned char *sk);
 
+<<<<<<< HEAD
 int naion_box_curve25519xchacha20poly1305_easy_afternm(
     unsigned char *c, const unsigned char *m, unsigned long long mlen,
     const unsigned char *n, const unsigned char *k);
@@ -256,6 +372,8 @@ int naion_box_curve25519xchacha20poly1305_open_easy_afternm(
     unsigned char *m, const unsigned char *c, unsigned long long clen,
     const unsigned char *n, const unsigned char *k);
 
+=======
+>>>>>>> dev-merge
 int naion_box_curve25519xchacha20poly1305_seal(unsigned char *c,
                                                  const unsigned char *m,
                                                  unsigned long long mlen,
@@ -268,6 +386,10 @@ int naion_box_curve25519xchacha20poly1305_seal_open(
 /* ------------------------------------------------------------------------- */
 /* X25519 box (XSalsa20-Poly1305 compatible names) */
 /* ------------------------------------------------------------------------- */
+<<<<<<< HEAD
+=======
+#if NAION_XSALSA20
+>>>>>>> dev-merge
 #define naion_box_curve25519xsalsa20poly1305_SEEDBYTES naion_box_curve25519xchacha20poly1305_SEEDBYTES
 #define naion_box_curve25519xsalsa20poly1305_PUBLICKEYBYTES naion_box_curve25519xchacha20poly1305_PUBLICKEYBYTES
 #define naion_box_curve25519xsalsa20poly1305_SECRETKEYBYTES naion_box_curve25519xchacha20poly1305_SECRETKEYBYTES
@@ -313,9 +435,20 @@ int naion_box_curve25519xsalsa20poly1305_seal(unsigned char *c,
 int naion_box_curve25519xsalsa20poly1305_seal_open(
     unsigned char *m, const unsigned char *c, unsigned long long clen,
     const unsigned char *pk, const unsigned char *sk);
+<<<<<<< HEAD
 
 /* runtime selector for default naion_box_* family */
 extern int gUseXChaCha20; /* 1: xchacha20poly1305, 0: xsalsa20poly1305 */
+=======
+#endif /* NAION_XSALSA20 */
+
+/* runtime selector for default naion_box_* family.
+ * With NAION_XSALSA20=0 the selector is a compile-time constant 1; the
+ * getters are still declared so existing call sites keep compiling. */
+#if NAION_XSALSA20
+extern int gUseXChaCha20; /* 1: xchacha20poly1305, 0: xsalsa20poly1305 */
+#endif
+>>>>>>> dev-merge
 void naion_box_set_use_xchacha20(int use_xchacha20);
 int naion_box_get_use_xchacha20(void);
 /* alias getter/setter for direct global-style naming */
@@ -409,6 +542,310 @@ int naion_sign_ed25519_pk_to_curve25519(unsigned char *curve25519_pk,
 int naion_sign_ed25519_sk_to_curve25519(unsigned char *curve25519_sk,
                                          const unsigned char *ed25519_sk);
 
+<<<<<<< HEAD
+=======
+/* ------------------------------------------------------------------------- */
+/* CSM — client/server secure messaging (client holds server public key)     */
+/* Identical packet layout to the former csm.h. See PROTOCOL.md.             */
+/* ------------------------------------------------------------------------- */
+
+enum {
+    NAION_CSM_OK = 0,
+    NAION_CSM_ERR_INVALID_ARGUMENT = -1,
+    NAION_CSM_ERR_BUFFER_TOO_SMALL = -2,
+    NAION_CSM_ERR_CRYPTO = -3,
+    NAION_CSM_ERR_VERIFY_FAILED = -4,
+    NAION_CSM_ERR_STATE = -5,
+    NAION_CSM_ERR_RANDOM_PROVIDER = -6,
+    NAION_CSM_ERR_NO_DATA = -7
+};
+
+#define NAION_CSM_PACKET_OVERHEAD \
+    (naion_sign_ed25519_BYTES + naion_box_PUBLICKEYBYTES_MAX + \
+     naion_box_NONCEBYTES_MAX + naion_box_MACBYTES_MAX)
+#define NAION_CSM_CLIENT_PK_BYTES naion_sign_ed25519_PUBLICKEYBYTES
+#define NAION_CSM_MAX_UDP_DATAGRAM_BYTES 1024U
+#define NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES \
+    (NAION_CSM_MAX_UDP_DATAGRAM_BYTES - NAION_CSM_PACKET_OVERHEAD - NAION_CSM_CLIENT_PK_BYTES)
+#define NAION_CSM_MAX_SERVER_PAYLOAD_BYTES \
+    (NAION_CSM_MAX_UDP_DATAGRAM_BYTES - NAION_CSM_PACKET_OVERHEAD)
+
+typedef struct naion_csm_client {
+    uint8_t ed_seed[naion_sign_ed25519_SEEDBYTES];
+    uint8_t ed_secret_key[naion_sign_ed25519_SECRETKEYBYTES];
+    uint8_t ed_public_key[naion_sign_ed25519_PUBLICKEYBYTES];
+    uint8_t server_ed_public_key[naion_sign_ed25519_PUBLICKEYBYTES];
+} naion_csm_client;
+
+typedef struct naion_csm_server {
+    uint8_t ed_seed[naion_sign_ed25519_SEEDBYTES];
+    uint8_t ed_secret_key[naion_sign_ed25519_SECRETKEYBYTES];
+    uint8_t ed_public_key[naion_sign_ed25519_PUBLICKEYBYTES];
+    uint8_t client_ed_public_key[naion_sign_ed25519_PUBLICKEYBYTES];
+    int client_public_key_initialized;
+} naion_csm_server;
+
+int naion_csm_init(void);
+void naion_csm_client_wipe(naion_csm_client *client);
+void naion_csm_server_wipe(naion_csm_server *server);
+
+int naion_csm_client_create(
+    naion_csm_client *client,
+    const uint8_t ed_seed_client[naion_sign_ed25519_SEEDBYTES],
+    const uint8_t ed_public_key_server[naion_sign_ed25519_PUBLICKEYBYTES]
+);
+
+int naion_csm_server_create(
+    naion_csm_server *server,
+    const uint8_t ed_seed_server[naion_sign_ed25519_SEEDBYTES]
+);
+
+size_t naion_csm_client_encrypt_size(size_t plaintext_len);
+size_t naion_csm_client_decrypt_max_plaintext_size(size_t packet_len);
+size_t naion_csm_server_encrypt_size(size_t plaintext_len);
+size_t naion_csm_server_decrypt_max_plaintext_size(size_t packet_len);
+
+int naion_csm_client_encrypt(
+    const naion_csm_client *client,
+    const uint8_t *plaintext,
+    size_t plaintext_len,
+    uint8_t *out_packet,
+    size_t out_packet_cap,
+    size_t *out_packet_len
+);
+
+int naion_csm_client_decrypt(
+    const naion_csm_client *client,
+    const uint8_t *packet,
+    size_t packet_len,
+    uint8_t *out_plaintext,
+    size_t out_plaintext_cap,
+    size_t *out_plaintext_len
+);
+
+int naion_csm_server_decrypt(
+    naion_csm_server *server,
+    const uint8_t *packet,
+    size_t packet_len,
+    uint8_t *out_plaintext,
+    size_t out_plaintext_cap,
+    size_t *out_plaintext_len
+);
+
+int naion_csm_server_encrypt(
+    const naion_csm_server *server,
+    const uint8_t *plaintext,
+    size_t plaintext_len,
+    uint8_t *out_packet,
+    size_t out_packet_cap,
+    size_t *out_packet_len
+);
+
+#endif /* NAION_LAYER_CSM */
+
+/* ========================================================================= */
+/* Layer 4 — NAION_LAYER_CSM_CA (CSM + CA-certificate handshake)            */
+/* ========================================================================= */
+#if NAION_LAYER_CSM_CA
+
+/*
+ * CA handshake: the client no longer needs the server's long-term public key
+ * up front. During a one-step handshake the server presents a 96-byte
+ * certificate = server_ed25519_public_key[32] || ca_signature[64], where the
+ * signature is Ed25519(server_ed_pk) produced offline by the CA. The client
+ * verifies it against a built-in CA public key, then communicates using the
+ * Layer 3 CSM packet format.
+ */
+#define NAION_CSM_CA_CERT_BYTES (naion_sign_ed25519_PUBLICKEYBYTES + naion_sign_ed25519_BYTES)
+
+typedef struct naion_csm_ca_client {
+    uint8_t ed_seed[naion_sign_ed25519_SEEDBYTES];
+    uint8_t ed_secret_key[naion_sign_ed25519_SECRETKEYBYTES];
+    uint8_t ed_public_key[naion_sign_ed25519_PUBLICKEYBYTES];
+    uint8_t ca_ed_public_key[naion_sign_ed25519_PUBLICKEYBYTES];   /* built-in CA public key */
+    uint8_t server_ed_public_key[naion_sign_ed25519_PUBLICKEYBYTES]; /* learnt from handshake */
+    int server_key_verified;
+} naion_csm_ca_client;
+
+typedef struct naion_csm_ca_server {
+    uint8_t ed_seed[naion_sign_ed25519_SEEDBYTES];
+    uint8_t ed_secret_key[naion_sign_ed25519_SECRETKEYBYTES];
+    uint8_t ed_public_key[naion_sign_ed25519_PUBLICKEYBYTES];
+    uint8_t ca_signature[naion_sign_ed25519_BYTES];                 /* precomputed: CA-sign(server_ed_pk) */
+    uint8_t client_ed_public_key[naion_sign_ed25519_PUBLICKEYBYTES]; /* learnt from first CSM packet */
+    int client_key_verified;
+} naion_csm_ca_server;
+
+int naion_csm_ca_client_create(naion_csm_ca_client *client,
+                                const uint8_t ed_seed[naion_sign_ed25519_SEEDBYTES],
+                                const uint8_t ca_ed_pk[naion_sign_ed25519_PUBLICKEYBYTES]);
+int naion_csm_ca_server_create(naion_csm_ca_server *server,
+                                const uint8_t ed_seed[naion_sign_ed25519_SEEDBYTES],
+                                const uint8_t ca_signature[naion_sign_ed25519_BYTES]);
+
+size_t naion_csm_ca_handshake_response_size(void); /* == NAION_CSM_CA_CERT_BYTES (96) */
+int naion_csm_ca_handshake_response(const naion_csm_ca_server *server,
+                                     uint8_t out_m1[NAION_CSM_CA_CERT_BYTES],
+                                     size_t out_cap, size_t *out_len);
+int naion_csm_ca_handshake_verify(naion_csm_ca_client *client,
+                                   const uint8_t *m1, size_t m1_len);
+
+/* Post-handshake CSM traffic (identical packet format to Layer 3). */
+size_t naion_csm_ca_client_encrypt_size(size_t plaintext_len);
+size_t naion_csm_ca_client_decrypt_max_plaintext_size(size_t packet_len);
+size_t naion_csm_ca_server_encrypt_size(size_t plaintext_len);
+size_t naion_csm_ca_server_decrypt_max_plaintext_size(size_t packet_len);
+
+int naion_csm_ca_client_encrypt(naion_csm_ca_client *client,
+                                 const uint8_t *plaintext, size_t plaintext_len,
+                                 uint8_t *out, size_t out_cap, size_t *out_len);
+int naion_csm_ca_client_decrypt(const naion_csm_ca_client *client,
+                                 const uint8_t *packet, size_t packet_len,
+                                 uint8_t *out, size_t out_cap, size_t *out_len);
+int naion_csm_ca_server_encrypt(const naion_csm_ca_server *server,
+                                 const uint8_t *plaintext, size_t plaintext_len,
+                                 uint8_t *out, size_t out_cap, size_t *out_len);
+int naion_csm_ca_server_decrypt(naion_csm_ca_server *server,
+                                 const uint8_t *packet, size_t packet_len,
+                                 uint8_t *out, size_t out_cap, size_t *out_len);
+void naion_csm_ca_client_wipe(naion_csm_ca_client *client);
+void naion_csm_ca_server_wipe(naion_csm_ca_server *server);
+
+#endif /* NAION_LAYER_CSM_CA */
+
+/* ========================================================================= */
+/* Layer 5 — NAION_LAYER_CSM_SESSION (ephemeral-ephemeral session DH, PFS)   */
+/* ========================================================================= */
+#if NAION_LAYER_CSM_SESSION
+/*
+ * CSM-Session: both peers run an ephemeral X25519 key pair for the lifetime of
+ * a session, so the long-term Ed25519 identity keys never participate in
+ * encryption.  A 1-RTT handshake authenticates both sides (CA certificate
+ * chain + CLIENT_HELLO signature), after which each side knows the other's
+ * Ed25519 public key and every packet is verified-then-decrypted symmetrically.
+ * Packet overhead drops to 104 bytes (sig || nonce || mac || ct).
+ *
+ * See naion/plan03.md for the full design.  Session table / DoS bookkeeping is
+ * deliberately left to the application layer (plan03 §2.3).
+ */
+
+#define NAION_CSM_SESS_CLIENT_HELLO_BYTES    128U  /* xpk(32) || ed_pk(32) || sig(64) */
+#define NAION_CSM_SESS_SERVER_RESPONSE_BYTES 192U  /* sxpk(32) || sig(64) || sed_pk(32) || ca_sig(64) */
+
+#define NAION_CSM_SESS_SESSION_XSK_BYTES     32U
+#define NAION_CSM_SESS_SESSION_XPK_BYTES     32U
+#define NAION_CSM_SESS_SESSION_SHARED_BYTES  32U
+#define NAION_CSM_SESS_SESSION_AEAD_KEY_BYTES 32U
+
+/* per-packet overhead = sig(64) + nonce(24) + mac(16) = 104 */
+#define NAION_CSM_SESS_PACKET_OVERHEAD \
+    (naion_sign_ed25519_BYTES + naion_box_NONCEBYTES_MAX + naion_box_MACBYTES_MAX)
+
+#define NAION_CSM_SESS_MAX_UDP_DATAGRAM_BYTES   1024U
+#define NAION_CSM_SESS_MAX_CLIENT_PAYLOAD_BYTES \
+    (NAION_CSM_SESS_MAX_UDP_DATAGRAM_BYTES - NAION_CSM_SESS_PACKET_OVERHEAD)
+#define NAION_CSM_SESS_MAX_SERVER_PAYLOAD_BYTES \
+    (NAION_CSM_SESS_MAX_UDP_DATAGRAM_BYTES - NAION_CSM_SESS_PACKET_OVERHEAD)
+
+typedef struct naion_csm_sess_client {
+    /* identity keys (Ed25519) */
+    uint8_t ed_seed[naion_sign_ed25519_SEEDBYTES];
+    uint8_t ed_secret_key[naion_sign_ed25519_SECRETKEYBYTES];
+    uint8_t ed_public_key[naion_sign_ed25519_PUBLICKEYBYTES];
+
+    /* CA trust anchor */
+    uint8_t ca_ed_public_key[naion_sign_ed25519_PUBLICKEYBYTES];
+
+    /* server identity learnt from the handshake */
+    uint8_t server_ed_public_key[naion_sign_ed25519_PUBLICKEYBYTES];
+
+    /* ephemeral session X25519 key pair + derived AEAD key */
+    uint8_t client_session_xsk[NAION_CSM_SESS_SESSION_XSK_BYTES];
+    uint8_t client_session_xpk[NAION_CSM_SESS_SESSION_XPK_BYTES];
+    uint8_t server_session_xpk[NAION_CSM_SESS_SESSION_XPK_BYTES];
+    uint8_t session_aead_key[NAION_CSM_SESS_SESSION_AEAD_KEY_BYTES];
+
+    int handshake_complete;  /* 0 = not finished, 1 = ready for traffic */
+} naion_csm_sess_client;
+
+typedef struct naion_csm_sess_server {
+    /* identity keys (Ed25519) */
+    uint8_t ed_seed[naion_sign_ed25519_SEEDBYTES];
+    uint8_t ed_secret_key[naion_sign_ed25519_SECRETKEYBYTES];
+    uint8_t ed_public_key[naion_sign_ed25519_PUBLICKEYBYTES];
+
+    /* precomputed CA signature over ed_public_key */
+    uint8_t ca_signature[naion_sign_ed25519_BYTES];
+
+    /* ephemeral session X25519 key pair + derived AEAD key */
+    uint8_t server_session_xsk[NAION_CSM_SESS_SESSION_XSK_BYTES];
+    uint8_t server_session_xpk[NAION_CSM_SESS_SESSION_XPK_BYTES];
+    uint8_t client_session_xpk[NAION_CSM_SESS_SESSION_XPK_BYTES];
+    uint8_t session_aead_key[NAION_CSM_SESS_SESSION_AEAD_KEY_BYTES];
+
+    /* client identity, verified during the handshake */
+    uint8_t client_ed_public_key[naion_sign_ed25519_PUBLICKEYBYTES];
+
+    int handshake_complete;
+} naion_csm_sess_server;
+
+int naion_csm_sess_client_create(
+    naion_csm_sess_client *client,
+    const uint8_t ed_seed[naion_sign_ed25519_SEEDBYTES],
+    const uint8_t ca_ed_pk[naion_sign_ed25519_PUBLICKEYBYTES]);
+
+int naion_csm_sess_server_create(
+    naion_csm_sess_server *server,
+    const uint8_t ed_seed[naion_sign_ed25519_SEEDBYTES],
+    const uint8_t ca_signature[naion_sign_ed25519_BYTES]);
+
+void naion_csm_sess_client_wipe(naion_csm_sess_client *client);
+void naion_csm_sess_server_wipe(naion_csm_sess_server *server);
+
+/* handshake: client_hello -> server_handshake -> client_finish (1-RTT) */
+int naion_csm_sess_client_hello(
+    naion_csm_sess_client *client,
+    uint8_t out_client_hello[NAION_CSM_SESS_CLIENT_HELLO_BYTES]);
+
+int naion_csm_sess_server_handshake(
+    naion_csm_sess_server *server,
+    const uint8_t client_hello[NAION_CSM_SESS_CLIENT_HELLO_BYTES],
+    uint8_t out_m1[NAION_CSM_SESS_SERVER_RESPONSE_BYTES],
+    size_t out_cap, size_t *out_len);
+
+int naion_csm_sess_client_finish(
+    naion_csm_sess_client *client,
+    const uint8_t *m1, size_t m1_len);
+
+/* post-handshake traffic: packet = sig(64) || nonce(24) || mac(16) || ct */
+size_t naion_csm_sess_client_encrypt_size(size_t plaintext_len);
+size_t naion_csm_sess_client_decrypt_max_plaintext_size(size_t packet_len);
+size_t naion_csm_sess_server_encrypt_size(size_t plaintext_len);
+size_t naion_csm_sess_server_decrypt_max_plaintext_size(size_t packet_len);
+
+int naion_csm_sess_client_encrypt(
+    naion_csm_sess_client *client,
+    const uint8_t *plaintext, size_t plaintext_len,
+    uint8_t *out, size_t out_cap, size_t *out_len);
+
+int naion_csm_sess_client_decrypt(
+    const naion_csm_sess_client *client,
+    const uint8_t *packet, size_t packet_len,
+    uint8_t *out, size_t out_cap, size_t *out_len);
+
+int naion_csm_sess_server_encrypt(
+    const naion_csm_sess_server *server,
+    const uint8_t *plaintext, size_t plaintext_len,
+    uint8_t *out, size_t out_cap, size_t *out_len);
+
+int naion_csm_sess_server_decrypt(
+    naion_csm_sess_server *server,
+    const uint8_t *packet, size_t packet_len,
+    uint8_t *out, size_t out_cap, size_t *out_len);
+
+#endif /* NAION_LAYER_CSM_SESSION */
+
+>>>>>>> dev-merge
 /*
  * Optional compatibility aliases.
  * Keep disabled by default to avoid symbol/name collisions with libsodium.
@@ -459,7 +896,17 @@ int naion_sign_ed25519_sk_to_curve25519(unsigned char *curve25519_sk,
 #define SIMPLE_SODIUM_ERR (-1)
 
 static naion_random_provider_fn g_random_provider = NULL;
+<<<<<<< HEAD
 int gUseXChaCha20 = 0;
+=======
+#if NAION_XSALSA20
+/* Default to XChaCha20-Poly1305 (24-byte nonce).
+ * Explicitly-named naion_*_xchacha20poly1305_* functions unconditionally use
+ * XChaCha20 and are unaffected by this switch; it only governs the generic
+ * naion_box_* dispatch family. Defaults to 1 to keep 24-byte nonce semantics. */
+int gUseXChaCha20 = 1;
+#endif
+>>>>>>> dev-merge
 
 static int naion_system_randombytes(unsigned char *buf, size_t size);
 static void naion_system_random_provider(void * const buf, const size_t size);
@@ -1133,7 +1580,11 @@ ed25519_sc_is_canonical(const unsigned char s[32])
 /* ------------------------------------------------------------------------- */
 
 typedef int64_t _naion_i64;
+<<<<<<< HEAD
 typedef _naion_i64 _naion_gf[16];
+=======
+typedef int32_t _naion_gf[16];
+>>>>>>> dev-merge
 
 static void
 _naion_x25519_set(_naion_gf dst, const _naion_gf src)
@@ -1171,8 +1622,13 @@ _naion_x25519_carry(_naion_gf o)
     for (i = 0; i < 16; i++) {
         o[i] += (_naion_i64) 1 << 16;
         c = o[i] >> 16;
+<<<<<<< HEAD
         o[(i + 1) * (i < 15)] += c - 1 + 37 * (c - 1) * (i == 15);
         o[i] -= c << 16;
+=======
+        o[(i + 1) * (i < 15)] += (int32_t) (c - 1 + 37 * (c - 1) * (i == 15));
+        o[i] -= (int32_t) (c << 16);
+>>>>>>> dev-merge
     }
 }
 
@@ -1236,24 +1692,65 @@ _naion_x25519_unpack(_naion_gf o, const uint8_t n[32])
 static void
 _naion_x25519_mul(_naion_gf o, const _naion_gf a, const _naion_gf b)
 {
+<<<<<<< HEAD
     _naion_i64 t[31];
+=======
+    /*
+     * Field elements live in 32-bit limbs (see _naion_gf typedef).  The
+     * convolution below accumulates into 64-bit temporaries so the products
+     * never lose precision; only once a limb has been fully reduced back into
+     * the 16-bit working range do we store it into the 32-bit element.
+     *
+     * Writing the raw 64-bit accumulator straight into a 32-bit limb would
+     * truncate it modulo 2**32, which is *not* a reduction modulo 2**255-19,
+     * so the subsequent carry passes could not repair it.  We therefore run
+     * the carry chain on the 64-bit buffer first, and only then demote each
+     * limb to _naion_gf.
+     */
+    _naion_i64 t[31];
+    _naion_i64 c;
+>>>>>>> dev-merge
     int        i;
     int        j;
 
     memset(t, 0, sizeof t);
     for (i = 0; i < 16; i++) {
         for (j = 0; j < 16; j++) {
+<<<<<<< HEAD
             t[i + j] += a[i] * b[j];
+=======
+            t[i + j] += (_naion_i64) a[i] * (_naion_i64) b[j];
+>>>>>>> dev-merge
         }
     }
     for (i = 0; i < 15; i++) {
         t[i] += 38 * t[i + 16];
     }
+<<<<<<< HEAD
     for (i = 0; i < 16; i++) {
         o[i] = t[i];
     }
     _naion_x25519_carry(o);
     _naion_x25519_carry(o);
+=======
+    /*
+     * Reduce the 16-limb result in place (on the 64-bit buffer) so every limb
+     * fits comfortably inside int32 before it is stored.  Three passes match
+     * the original TweetNaCl contract and keep the canonical range; the loop
+     * is identical to _naion_x25519_carry but operates on int64 storage.
+     */
+    for (j = 0; j < 3; j++) {
+        for (i = 0; i < 16; i++) {
+            t[i] += (_naion_i64) 1 << 16;
+            c = t[i] >> 16;
+            t[(i + 1) * (i < 15)] += c - 1 + 37 * (c - 1) * (i == 15);
+            t[i] -= c << 16;
+        }
+    }
+    for (i = 0; i < 16; i++) {
+        o[i] = (int32_t) t[i];
+    }
+>>>>>>> dev-merge
 }
 
 static void
@@ -1928,6 +2425,13 @@ rotl32(uint32_t x, int b)
     return (x << b) | (x >> (32 - b));
 }
 
+<<<<<<< HEAD
+=======
+#if NAION_XSALSA20
+/* ------------------------------------------------------------------ */
+/* Salsa20 / HSalsa20 / XSalsa20 (only built when NAION_XSALSA20=1)   */
+/* ------------------------------------------------------------------ */
+>>>>>>> dev-merge
 static void
 salsa20_quarterround(uint32_t *a, uint32_t *b, uint32_t *c, uint32_t *d)
 {
@@ -2091,6 +2595,10 @@ xsalsa20_xor_ic(uint8_t *c, const uint8_t *m, uint64_t mlen,
     naion_memzero(block, sizeof block);
     return SIMPLE_SODIUM_OK;
 }
+<<<<<<< HEAD
+=======
+#endif /* NAION_XSALSA20 */
+>>>>>>> dev-merge
 
 static void
 chacha20_quarterround(uint32_t *a, uint32_t *b, uint32_t *c, uint32_t *d)
@@ -2861,6 +3369,10 @@ naion_init(void)
     return SIMPLE_SODIUM_OK;
 }
 
+<<<<<<< HEAD
+=======
+#if NAION_LAYER_SYMM
+>>>>>>> dev-merge
 void
 naion_set_random_provider(naion_random_provider_fn provider)
 {
@@ -2988,6 +3500,16 @@ naion_stream_xchacha20_xor_ic(unsigned char *c, const unsigned char *m,
     return xchacha20_xor_ic(c, m, (uint64_t) mlen, n, ic, k);
 }
 
+<<<<<<< HEAD
+=======
+#endif /* NAION_LAYER_SYMM */
+
+/* ========================================================================= */
+/* Layer 2 implementations — AEAD-IETF + secretbox + box symmetric core    */
+/* ========================================================================= */
+#if NAION_LAYER_AEAD
+
+>>>>>>> dev-merge
 /*
  * Combined AEAD layout matches libsodium: ciphertext || mac.
  * This intentionally differs from naion_box_*_easy()/secretbox_easy(),
@@ -3242,6 +3764,168 @@ naion_secretbox_xchacha20poly1305_open_detached(unsigned char *m,
     return ret;
 }
 
+<<<<<<< HEAD
+=======
+/* Box symmetric core: pure XChaCha20-Poly1305 (no Curve25519). Lives at the
+ * AEAD layer because secretbox delegates to it; the asymmetric box wrappers
+ * (beforenm/easy/seal) that add X25519 key agreement live at Layer 3. */
+int
+naion_box_curve25519xchacha20poly1305_easy_afternm(
+    unsigned char *c, const unsigned char *m, unsigned long long mlen,
+    const unsigned char *n, const unsigned char *k)
+{
+    if (c == NULL || n == NULL || k == NULL || (m == NULL && mlen > 0ULL)) {
+        return SIMPLE_SODIUM_ERR;
+    }
+#if defined(DEBUG) && DEBUG
+    naion_debug_dump_hex("box.easy_afternm.nonce", n, 24U);
+    naion_debug_dump_hex("box.easy_afternm.k_nm", k, 32U);
+    if (m != NULL) {
+        naion_debug_dump_hex("box.easy_afternm.msg", m, (size_t) mlen);
+    }
+#endif
+
+    {
+        uint8_t               block0[64];
+        _naion_poly1305_state st;
+        uint64_t              rem;
+        size_t                first_take;
+        int                   ret;
+
+        memset(block0, 0, sizeof block0);
+        first_take = (size_t) ((mlen < 32ULL) ? mlen : 32ULL);
+        if (first_take > 0U) {
+            memcpy(block0 + 32U, m, first_take);
+        }
+        ret = naion_stream_xchacha20_xor_ic(block0, block0,
+                                            (unsigned long long) (32U + first_take),
+                                            n, 0ULL, k);
+        if (ret != SIMPLE_SODIUM_OK) {
+            naion_memzero(block0, sizeof block0);
+            return SIMPLE_SODIUM_ERR;
+        }
+        poly1305_init(&st, block0);
+        if (first_take > 0U) {
+            memcpy(c + naion_box_curve25519xchacha20poly1305_MACBYTES,
+                   block0 + 32U, first_take);
+        }
+        rem = mlen - (uint64_t) first_take;
+        if (rem > 0ULL) {
+            ret = naion_stream_xchacha20_xor_ic(
+                c + naion_box_curve25519xchacha20poly1305_MACBYTES + first_take,
+                m + first_take,
+                rem,
+                n, 1ULL, k);
+            if (ret != SIMPLE_SODIUM_OK) {
+                naion_memzero(block0, sizeof block0);
+                naion_memzero(&st, sizeof st);
+                return SIMPLE_SODIUM_ERR;
+            }
+        }
+
+        poly1305_update(&st,
+                        c + naion_box_curve25519xchacha20poly1305_MACBYTES,
+                        (size_t) mlen);
+        poly1305_finish(&st, c);
+        ret = SIMPLE_SODIUM_OK;
+
+        naion_memzero(block0, sizeof block0);
+        naion_memzero(&st, sizeof st);
+#if defined(DEBUG) && DEBUG
+        if (ret == SIMPLE_SODIUM_OK) {
+            naion_debug_dump_hex("box.easy_afternm.mac", c, 16U);
+            naion_debug_dump_hex("box.easy_afternm.cipher",
+                                 c + naion_box_curve25519xchacha20poly1305_MACBYTES,
+                                 (size_t) mlen);
+        } else {
+            printf("[naion][dbg] box.easy_afternm ret=%d\n", ret);
+        }
+#endif
+        return ret;
+    }
+}
+
+int
+naion_box_curve25519xchacha20poly1305_open_easy_afternm(
+    unsigned char *m, const unsigned char *c, unsigned long long clen,
+    const unsigned char *n, const unsigned char *k)
+{
+    if (m == NULL || c == NULL || n == NULL || k == NULL ||
+        clen < naion_box_curve25519xchacha20poly1305_MACBYTES) {
+        return SIMPLE_SODIUM_ERR;
+    }
+#if defined(DEBUG) && DEBUG
+    naion_debug_dump_hex("box.open_easy_afternm.nonce", n, 24U);
+    naion_debug_dump_hex("box.open_easy_afternm.k_nm", k, 32U);
+    naion_debug_dump_hex("box.open_easy_afternm.mac", c, 16U);
+    naion_debug_dump_hex("box.open_easy_afternm.cipher",
+                         c + naion_box_curve25519xchacha20poly1305_MACBYTES,
+                         (size_t) (clen - naion_box_curve25519xchacha20poly1305_MACBYTES));
+#endif
+
+    {
+        uint8_t               block0[64];
+        uint8_t               computed_mac[16];
+        _naion_poly1305_state st;
+        const unsigned char  *cipher =
+            c + naion_box_curve25519xchacha20poly1305_MACBYTES;
+        const unsigned long long mlen =
+            clen - naion_box_curve25519xchacha20poly1305_MACBYTES;
+        size_t                first_take;
+        uint64_t              rem;
+        int                   ret;
+
+        memset(block0, 0, sizeof block0);
+        first_take = (size_t) ((mlen < 32ULL) ? mlen : 32ULL);
+        if (first_take > 0U) {
+            memcpy(block0 + 32U, cipher, first_take);
+        }
+        ret = naion_stream_xchacha20_xor_ic(block0, block0, sizeof block0, n, 0ULL, k);
+        if (ret != SIMPLE_SODIUM_OK) {
+            naion_memzero(block0, sizeof block0);
+            return SIMPLE_SODIUM_ERR;
+        }
+        poly1305_init(&st, block0);
+        poly1305_update(&st, cipher, (size_t) mlen);
+        poly1305_finish(&st, computed_mac);
+
+        if (verify16(c, computed_mac) != 1) {
+            naion_memzero(block0, sizeof block0);
+            naion_memzero(computed_mac, sizeof computed_mac);
+            naion_memzero(&st, sizeof st);
+            return SIMPLE_SODIUM_ERR;
+        }
+        if (first_take > 0U) {
+            memcpy(m, block0 + 32U, first_take);
+        }
+        rem = mlen - (uint64_t) first_take;
+        if (rem > 0ULL) {
+            ret = naion_stream_xchacha20_xor_ic(m + first_take, cipher + first_take, rem, n, 1ULL, k);
+        } else {
+            ret = SIMPLE_SODIUM_OK;
+        }
+        naion_memzero(block0, sizeof block0);
+        naion_memzero(computed_mac, sizeof computed_mac);
+        naion_memzero(&st, sizeof st);
+        if (ret != SIMPLE_SODIUM_OK) {
+            return SIMPLE_SODIUM_ERR;
+        }
+        ret = SIMPLE_SODIUM_OK;
+#if defined(DEBUG) && DEBUG
+        if (ret == SIMPLE_SODIUM_OK) {
+            naion_debug_dump_hex("box.open_easy_afternm.msg",
+                                 m,
+                                 (size_t) (clen - naion_box_curve25519xchacha20poly1305_MACBYTES));
+        } else {
+            printf("[naion][dbg] box.open_easy_afternm ret=%d\n", ret);
+        }
+#endif
+        return ret;
+    }
+}
+
+#if NAION_XSALSA20
+>>>>>>> dev-merge
 int
 naion_secretbox_xsalsa20poly1305_easy(unsigned char *c,
                                       const unsigned char *m,
@@ -3333,6 +4017,17 @@ naion_secretbox_xsalsa20poly1305_open_detached(unsigned char *m,
     free(combined);
     return ret;
 }
+<<<<<<< HEAD
+=======
+#endif /* NAION_XSALSA20 */
+
+#endif /* NAION_LAYER_AEAD */
+
+/* ========================================================================= */
+/* Layer 3 implementations — X25519/KX + asymmetric box + Ed25519 + CSM    */
+/* ========================================================================= */
+#if NAION_LAYER_CSM
+>>>>>>> dev-merge
 
 int
 naion_scalarmult_curve25519(unsigned char *q,
@@ -3616,6 +4311,7 @@ naion_box_curve25519xchacha20poly1305_open_easy(
 }
 
 int
+<<<<<<< HEAD
 naion_box_curve25519xchacha20poly1305_easy_afternm(
     unsigned char *c, const unsigned char *m, unsigned long long mlen,
     const unsigned char *n, const unsigned char *k)
@@ -3771,6 +4467,8 @@ naion_box_curve25519xchacha20poly1305_open_easy_afternm(
 }
 
 int
+=======
+>>>>>>> dev-merge
 naion_box_curve25519xchacha20poly1305_seal(unsigned char *c,
                                              const unsigned char *m,
                                              unsigned long long mlen,
@@ -3861,6 +4559,10 @@ naion_box_curve25519xchacha20poly1305_seal_open(
     }
 }
 
+<<<<<<< HEAD
+=======
+#if NAION_XSALSA20
+>>>>>>> dev-merge
 int
 naion_box_curve25519xsalsa20poly1305_keypair(unsigned char *pk,
                                               unsigned char *sk)
@@ -4137,17 +4839,42 @@ naion_box_curve25519xsalsa20poly1305_seal_open(
     naion_memzero(nonce, sizeof nonce);
     return ret;
 }
+<<<<<<< HEAD
 
 void
 naion_box_set_use_xchacha20(int use_xchacha20)
 {
     gUseXChaCha20 = (use_xchacha20 != 0) ? 1 : 0;
+=======
+#endif /* NAION_XSALSA20 */
+
+/* ------------------------------------------------------------------ */
+/* Runtime XChaCha20/XSalsa20 selector + generic naion_box_* dispatch */
+/* ------------------------------------------------------------------ */
+void
+naion_box_set_use_xchacha20(int use_xchacha20)
+{
+#if NAION_XSALSA20
+    gUseXChaCha20 = (use_xchacha20 != 0) ? 1 : 0;
+#else
+    /* No-op: only XChaCha20 is available. */
+    (void) use_xchacha20;
+#endif
+>>>>>>> dev-merge
 }
 
 int
 naion_box_get_use_xchacha20(void)
 {
+<<<<<<< HEAD
     return (gUseXChaCha20 != 0) ? 1 : 0;
+=======
+#if NAION_XSALSA20
+    return (gUseXChaCha20 != 0) ? 1 : 0;
+#else
+    return 1; /* XChaCha20 is always selected when XSalsa20 is absent. */
+#endif
+>>>>>>> dev-merge
 }
 
 void
@@ -4165,143 +4892,252 @@ naion_get_use_xchacha20(void)
 size_t
 naion_box_seedbytes(void)
 {
+<<<<<<< HEAD
     return (naion_box_get_use_xchacha20() != 0)
                ? (size_t) naion_box_curve25519xchacha20poly1305_SEEDBYTES
                : (size_t) naion_box_curve25519xsalsa20poly1305_SEEDBYTES;
+=======
+    return (size_t) naion_box_curve25519xchacha20poly1305_SEEDBYTES;
+>>>>>>> dev-merge
 }
 
 size_t
 naion_box_publickeybytes(void)
 {
+<<<<<<< HEAD
     return (naion_box_get_use_xchacha20() != 0)
                ? (size_t) naion_box_curve25519xchacha20poly1305_PUBLICKEYBYTES
                : (size_t) naion_box_curve25519xsalsa20poly1305_PUBLICKEYBYTES;
+=======
+    return (size_t) naion_box_curve25519xchacha20poly1305_PUBLICKEYBYTES;
+>>>>>>> dev-merge
 }
 
 size_t
 naion_box_secretkeybytes(void)
 {
+<<<<<<< HEAD
     return (naion_box_get_use_xchacha20() != 0)
                ? (size_t) naion_box_curve25519xchacha20poly1305_SECRETKEYBYTES
                : (size_t) naion_box_curve25519xsalsa20poly1305_SECRETKEYBYTES;
+=======
+    return (size_t) naion_box_curve25519xchacha20poly1305_SECRETKEYBYTES;
+>>>>>>> dev-merge
 }
 
 size_t
 naion_box_beforenmbytes(void)
 {
+<<<<<<< HEAD
     return (naion_box_get_use_xchacha20() != 0)
                ? (size_t) naion_box_curve25519xchacha20poly1305_BEFORENMBYTES
                : (size_t) naion_box_curve25519xsalsa20poly1305_BEFORENMBYTES;
+=======
+    return (size_t) naion_box_curve25519xchacha20poly1305_BEFORENMBYTES;
+>>>>>>> dev-merge
 }
 
 size_t
 naion_box_noncebytes(void)
 {
+<<<<<<< HEAD
     return (naion_box_get_use_xchacha20() != 0)
                ? (size_t) naion_box_curve25519xchacha20poly1305_NONCEBYTES
                : (size_t) naion_box_curve25519xsalsa20poly1305_NONCEBYTES;
+=======
+    return (size_t) naion_box_curve25519xchacha20poly1305_NONCEBYTES;
+>>>>>>> dev-merge
 }
 
 size_t
 naion_box_macbytes(void)
 {
+<<<<<<< HEAD
     return (naion_box_get_use_xchacha20() != 0)
                ? (size_t) naion_box_curve25519xchacha20poly1305_MACBYTES
                : (size_t) naion_box_curve25519xsalsa20poly1305_MACBYTES;
+=======
+    return (size_t) naion_box_curve25519xchacha20poly1305_MACBYTES;
+>>>>>>> dev-merge
 }
 
 size_t
 naion_box_sealbytes(void)
 {
+<<<<<<< HEAD
     return (naion_box_get_use_xchacha20() != 0)
                ? (size_t) naion_box_curve25519xchacha20poly1305_SEALBYTES
                : (size_t) naion_box_curve25519xsalsa20poly1305_SEALBYTES;
+=======
+    return (size_t) naion_box_curve25519xchacha20poly1305_SEALBYTES;
+>>>>>>> dev-merge
 }
 
 int
 naion_box_keypair(unsigned char *pk, unsigned char *sk)
 {
+<<<<<<< HEAD
     if (naion_box_get_use_xchacha20() != 0) {
         return naion_box_curve25519xchacha20poly1305_keypair(pk, sk);
     }
     return naion_box_curve25519xsalsa20poly1305_keypair(pk, sk);
+=======
+#if NAION_XSALSA20
+    if (naion_box_get_use_xchacha20() == 0) {
+        return naion_box_curve25519xsalsa20poly1305_keypair(pk, sk);
+    }
+#endif
+    return naion_box_curve25519xchacha20poly1305_keypair(pk, sk);
+>>>>>>> dev-merge
 }
 
 int
 naion_box_seed_keypair(unsigned char *pk, unsigned char *sk, const unsigned char *seed)
 {
+<<<<<<< HEAD
     if (naion_box_get_use_xchacha20() != 0) {
         return naion_box_curve25519xchacha20poly1305_seed_keypair(pk, sk, seed);
     }
     return naion_box_curve25519xsalsa20poly1305_seed_keypair(pk, sk, seed);
+=======
+#if NAION_XSALSA20
+    if (naion_box_get_use_xchacha20() == 0) {
+        return naion_box_curve25519xsalsa20poly1305_seed_keypair(pk, sk, seed);
+    }
+#endif
+    return naion_box_curve25519xchacha20poly1305_seed_keypair(pk, sk, seed);
+>>>>>>> dev-merge
 }
 
 int
 naion_box_beforenm(unsigned char *k, const unsigned char *pk, const unsigned char *sk)
 {
+<<<<<<< HEAD
     if (naion_box_get_use_xchacha20() != 0) {
         return naion_box_curve25519xchacha20poly1305_beforenm(k, pk, sk);
     }
     return naion_box_curve25519xsalsa20poly1305_beforenm(k, pk, sk);
+=======
+#if NAION_XSALSA20
+    if (naion_box_get_use_xchacha20() == 0) {
+        return naion_box_curve25519xsalsa20poly1305_beforenm(k, pk, sk);
+    }
+#endif
+    return naion_box_curve25519xchacha20poly1305_beforenm(k, pk, sk);
+>>>>>>> dev-merge
 }
 
 int
 naion_box_easy(unsigned char *c, const unsigned char *m, unsigned long long mlen,
                const unsigned char *n, const unsigned char *pk, const unsigned char *sk)
 {
+<<<<<<< HEAD
     if (naion_box_get_use_xchacha20() != 0) {
         return naion_box_curve25519xchacha20poly1305_easy(c, m, mlen, n, pk, sk);
     }
     return naion_box_curve25519xsalsa20poly1305_easy(c, m, mlen, n, pk, sk);
+=======
+#if NAION_XSALSA20
+    if (naion_box_get_use_xchacha20() == 0) {
+        return naion_box_curve25519xsalsa20poly1305_easy(c, m, mlen, n, pk, sk);
+    }
+#endif
+    return naion_box_curve25519xchacha20poly1305_easy(c, m, mlen, n, pk, sk);
+>>>>>>> dev-merge
 }
 
 int
 naion_box_open_easy(unsigned char *m, const unsigned char *c, unsigned long long clen,
                     const unsigned char *n, const unsigned char *pk, const unsigned char *sk)
 {
+<<<<<<< HEAD
     if (naion_box_get_use_xchacha20() != 0) {
         return naion_box_curve25519xchacha20poly1305_open_easy(m, c, clen, n, pk, sk);
     }
     return naion_box_curve25519xsalsa20poly1305_open_easy(m, c, clen, n, pk, sk);
+=======
+#if NAION_XSALSA20
+    if (naion_box_get_use_xchacha20() == 0) {
+        return naion_box_curve25519xsalsa20poly1305_open_easy(m, c, clen, n, pk, sk);
+    }
+#endif
+    return naion_box_curve25519xchacha20poly1305_open_easy(m, c, clen, n, pk, sk);
+>>>>>>> dev-merge
 }
 
 int
 naion_box_easy_afternm(unsigned char *c, const unsigned char *m, unsigned long long mlen,
                        const unsigned char *n, const unsigned char *k)
 {
+<<<<<<< HEAD
     if (naion_box_get_use_xchacha20() != 0) {
         return naion_box_curve25519xchacha20poly1305_easy_afternm(c, m, mlen, n, k);
     }
     return naion_box_curve25519xsalsa20poly1305_easy_afternm(c, m, mlen, n, k);
+=======
+#if NAION_XSALSA20
+    if (naion_box_get_use_xchacha20() == 0) {
+        return naion_box_curve25519xsalsa20poly1305_easy_afternm(c, m, mlen, n, k);
+    }
+#endif
+    return naion_box_curve25519xchacha20poly1305_easy_afternm(c, m, mlen, n, k);
+>>>>>>> dev-merge
 }
 
 int
 naion_box_open_easy_afternm(unsigned char *m, const unsigned char *c, unsigned long long clen,
                             const unsigned char *n, const unsigned char *k)
 {
+<<<<<<< HEAD
     if (naion_box_get_use_xchacha20() != 0) {
         return naion_box_curve25519xchacha20poly1305_open_easy_afternm(m, c, clen, n, k);
     }
     return naion_box_curve25519xsalsa20poly1305_open_easy_afternm(m, c, clen, n, k);
+=======
+#if NAION_XSALSA20
+    if (naion_box_get_use_xchacha20() == 0) {
+        return naion_box_curve25519xsalsa20poly1305_open_easy_afternm(m, c, clen, n, k);
+    }
+#endif
+    return naion_box_curve25519xchacha20poly1305_open_easy_afternm(m, c, clen, n, k);
+>>>>>>> dev-merge
 }
 
 int
 naion_box_seal(unsigned char *c, const unsigned char *m, unsigned long long mlen, const unsigned char *pk)
 {
+<<<<<<< HEAD
     if (naion_box_get_use_xchacha20() != 0) {
         return naion_box_curve25519xchacha20poly1305_seal(c, m, mlen, pk);
     }
     return naion_box_curve25519xsalsa20poly1305_seal(c, m, mlen, pk);
+=======
+#if NAION_XSALSA20
+    if (naion_box_get_use_xchacha20() == 0) {
+        return naion_box_curve25519xsalsa20poly1305_seal(c, m, mlen, pk);
+    }
+#endif
+    return naion_box_curve25519xchacha20poly1305_seal(c, m, mlen, pk);
+>>>>>>> dev-merge
 }
 
 int
 naion_box_seal_open(unsigned char *m, const unsigned char *c, unsigned long long clen,
                     const unsigned char *pk, const unsigned char *sk)
 {
+<<<<<<< HEAD
     if (naion_box_get_use_xchacha20() != 0) {
         return naion_box_curve25519xchacha20poly1305_seal_open(m, c, clen, pk, sk);
     }
     return naion_box_curve25519xsalsa20poly1305_seal_open(m, c, clen, pk, sk);
+=======
+#if NAION_XSALSA20
+    if (naion_box_get_use_xchacha20() == 0) {
+        return naion_box_curve25519xsalsa20poly1305_seal_open(m, c, clen, pk, sk);
+    }
+#endif
+    return naion_box_curve25519xchacha20poly1305_seal_open(m, c, clen, pk, sk);
+>>>>>>> dev-merge
 }
 
 int
@@ -4467,8 +5303,1322 @@ naion_sign_ed25519_sk_to_curve25519(unsigned char *curve25519_sk,
     return SIMPLE_SODIUM_OK;
 }
 
+<<<<<<< HEAD
 
 
+=======
+/* ------------------------------------------------------------------------- */
+/* CSM (client/server secure messaging) implementation.                     */
+/* Merged from the former csm.h. Uses the unified goto cleanup pattern:      */
+/* __ERROR__ zeroes sensitive material on failure, __FREE__ releases all     */
+/* resources on every exit path, with a single return statement.             */
+/* ------------------------------------------------------------------------- */
+
+#define NAION_CSM__SIGN_BYTES      naion_sign_ed25519_BYTES
+#define NAION_CSM__ED_PK_BYTES     naion_sign_ed25519_PUBLICKEYBYTES
+#define NAION_CSM__X_PK_BYTES      naion_box_PUBLICKEYBYTES_MAX
+#define NAION_CSM__X_SK_BYTES      naion_box_SECRETKEYBYTES_MAX
+#define NAION_CSM__NONCE_BYTES     naion_box_NONCEBYTES_MAX
+#define NAION_CSM__MAC_BYTES       naion_box_MACBYTES_MAX
+#define NAION_CSM__AEAD_KEY_BYTES  naion_aead_xchacha20poly1305_ietf_KEYBYTES
+
+static int naion_csm_internal_randombytes(uint8_t *buf, size_t size) {
+    naion_random_provider_fn provider;
+    if (buf == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (size == 0U) {
+        return NAION_CSM_OK;
+    }
+    provider = naion_get_random_provider();
+    if (provider == NULL) {
+        return NAION_CSM_ERR_RANDOM_PROVIDER;
+    }
+    provider(buf, size);
+    return NAION_CSM_OK;
+}
+
+static int naion_csm_internal_seal(
+    const uint8_t *plaintext,
+    size_t plaintext_len,
+    const uint8_t peer_xpk[NAION_CSM__X_PK_BYTES],
+    const uint8_t self_xsk[NAION_CSM__X_SK_BYTES],
+    const uint8_t aad[NAION_CSM__X_PK_BYTES],
+    uint8_t *out_nonce_cipher
+) {
+    int ret;
+    uint8_t nonce[NAION_CSM__NONCE_BYTES];
+    uint8_t ekey[NAION_CSM__AEAD_KEY_BYTES];
+    unsigned long long mac_len = 0ULL;
+    if (peer_xpk == NULL || self_xsk == NULL || aad == NULL || out_nonce_cipher == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (plaintext_len > 0U && plaintext == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    ret = naion_csm_internal_randombytes(nonce, sizeof(nonce));
+    if (ret != NAION_CSM_OK) {
+        return ret;
+    }
+    ret = naion_box_curve25519xchacha20poly1305_beforenm(ekey, peer_xpk, self_xsk);
+    if (ret != 0) {
+        naion_memzero(nonce, sizeof(nonce));
+        naion_memzero(ekey, sizeof(ekey));
+        return NAION_CSM_ERR_CRYPTO;
+    }
+    memmove(out_nonce_cipher, nonce, sizeof(nonce));
+    ret = naion_aead_xchacha20poly1305_ietf_encrypt_detached(
+        out_nonce_cipher + NAION_CSM__NONCE_BYTES + NAION_CSM__MAC_BYTES,
+        out_nonce_cipher + NAION_CSM__NONCE_BYTES,
+        &mac_len,
+        plaintext,
+        (unsigned long long) plaintext_len,
+        aad,
+        (unsigned long long) NAION_CSM__X_PK_BYTES,
+        NULL,
+        nonce,
+        ekey
+    );
+    if (ret != 0 || mac_len != (unsigned long long) NAION_CSM__MAC_BYTES) {
+        naion_memzero(nonce, sizeof(nonce));
+        naion_memzero(ekey, sizeof(ekey));
+        return NAION_CSM_ERR_CRYPTO;
+    }
+    naion_memzero(nonce, sizeof(nonce));
+    naion_memzero(ekey, sizeof(ekey));
+    return NAION_CSM_OK;
+}
+
+static int naion_csm_internal_open(
+    const uint8_t *nonce_cipher,
+    size_t nonce_cipher_len,
+    const uint8_t peer_xpk[NAION_CSM__X_PK_BYTES],
+    const uint8_t self_xsk[NAION_CSM__X_SK_BYTES],
+    const uint8_t aad[NAION_CSM__X_PK_BYTES],
+    uint8_t *out_plaintext,
+    size_t *out_plaintext_len
+) {
+    size_t plaintext_len;
+    int ret;
+    const uint8_t *nonce;
+    const uint8_t *mac;
+    const uint8_t *ciphertext;
+    uint8_t ekey[NAION_CSM__AEAD_KEY_BYTES];
+    if (nonce_cipher == NULL || peer_xpk == NULL || self_xsk == NULL || aad == NULL ||
+        out_plaintext == NULL || out_plaintext_len == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (nonce_cipher_len <= (size_t) (NAION_CSM__NONCE_BYTES + NAION_CSM__MAC_BYTES)) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    plaintext_len = nonce_cipher_len - (size_t) NAION_CSM__NONCE_BYTES - (size_t) NAION_CSM__MAC_BYTES;
+    nonce = nonce_cipher;
+    mac = nonce_cipher + NAION_CSM__NONCE_BYTES;
+    ciphertext = nonce_cipher + NAION_CSM__NONCE_BYTES + NAION_CSM__MAC_BYTES;
+    ret = naion_box_curve25519xchacha20poly1305_beforenm(ekey, peer_xpk, self_xsk);
+    if (ret != 0) {
+        naion_memzero(ekey, sizeof(ekey));
+        return NAION_CSM_ERR_CRYPTO;
+    }
+    ret = naion_aead_xchacha20poly1305_ietf_decrypt_detached(
+        out_plaintext,
+        NULL,
+        ciphertext,
+        (unsigned long long) plaintext_len,
+        mac,
+        aad,
+        (unsigned long long) NAION_CSM__X_PK_BYTES,
+        nonce,
+        ekey
+    );
+    naion_memzero(ekey, sizeof(ekey));
+    if (ret != 0) {
+        return NAION_CSM_ERR_CRYPTO;
+    }
+    *out_plaintext_len = plaintext_len;
+    return NAION_CSM_OK;
+}
+
+static int naion_csm_internal_sign(
+    const uint8_t *buffer,
+    size_t buffer_len,
+    const uint8_t ed_secret_key[naion_sign_ed25519_SECRETKEYBYTES],
+    uint8_t out_signature[NAION_CSM__SIGN_BYTES]
+) {
+    int ret;
+    unsigned long long signature_len = 0ULL;
+    if (buffer == NULL || ed_secret_key == NULL || out_signature == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    ret = naion_sign_ed25519_detached(
+        out_signature,
+        &signature_len,
+        buffer,
+        (unsigned long long) buffer_len,
+        ed_secret_key
+    );
+    if (ret != 0 || signature_len != (unsigned long long) NAION_CSM__SIGN_BYTES) {
+        return NAION_CSM_ERR_CRYPTO;
+    }
+    return NAION_CSM_OK;
+}
+
+static int naion_csm_internal_verify(
+    const uint8_t signature[NAION_CSM__SIGN_BYTES],
+    const uint8_t *buffer,
+    size_t buffer_len,
+    const uint8_t ed_public_key[NAION_CSM__ED_PK_BYTES]
+) {
+    int ret;
+    if (signature == NULL || buffer == NULL || ed_public_key == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    ret = naion_sign_ed25519_verify_detached(
+        signature,
+        buffer,
+        (unsigned long long) buffer_len,
+        ed_public_key
+    );
+    return (ret == 0) ? NAION_CSM_OK : NAION_CSM_ERR_VERIFY_FAILED;
+}
+
+int naion_csm_init(void) {
+    return (naion_init() == 0) ? NAION_CSM_OK : NAION_CSM_ERR_CRYPTO;
+}
+
+void naion_csm_client_wipe(naion_csm_client *client) {
+    if (client != NULL) {
+        naion_memzero(client, sizeof(*client));
+    }
+}
+
+void naion_csm_server_wipe(naion_csm_server *server) {
+    if (server != NULL) {
+        naion_memzero(server, sizeof(*server));
+    }
+}
+
+int naion_csm_client_create(
+    naion_csm_client *client,
+    const uint8_t ed_seed_client[naion_sign_ed25519_SEEDBYTES],
+    const uint8_t ed_public_key_server[naion_sign_ed25519_PUBLICKEYBYTES]
+) {
+    int ret;
+    if (client == NULL || ed_seed_client == NULL || ed_public_key_server == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    memset(client, 0, sizeof(*client));
+    memmove(client->ed_seed, ed_seed_client, naion_sign_ed25519_SEEDBYTES);
+    memmove(client->server_ed_public_key, ed_public_key_server, naion_sign_ed25519_PUBLICKEYBYTES);
+    ret = naion_sign_ed25519_seed_keypair(
+        client->ed_public_key,
+        client->ed_secret_key,
+        client->ed_seed
+    );
+    return (ret == 0) ? NAION_CSM_OK : NAION_CSM_ERR_CRYPTO;
+}
+
+int naion_csm_server_create(
+    naion_csm_server *server,
+    const uint8_t ed_seed_server[naion_sign_ed25519_SEEDBYTES]
+) {
+    int ret;
+    if (server == NULL || ed_seed_server == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    memset(server, 0, sizeof(*server));
+    memmove(server->ed_seed, ed_seed_server, naion_sign_ed25519_SEEDBYTES);
+    ret = naion_sign_ed25519_seed_keypair(
+        server->ed_public_key,
+        server->ed_secret_key,
+        server->ed_seed
+    );
+    if (ret != 0) {
+        return NAION_CSM_ERR_CRYPTO;
+    }
+    server->client_public_key_initialized = 0;
+    return NAION_CSM_OK;
+}
+
+size_t naion_csm_client_encrypt_size(size_t plaintext_len) {
+    return (size_t) NAION_CSM__SIGN_BYTES +
+           (size_t) NAION_CSM__X_PK_BYTES +
+           (size_t) NAION_CSM__NONCE_BYTES +
+           (size_t) NAION_CSM__MAC_BYTES +
+           (size_t) NAION_CSM__ED_PK_BYTES +
+           plaintext_len;
+}
+
+size_t naion_csm_client_decrypt_max_plaintext_size(size_t packet_len) {
+    size_t fixed = (size_t) NAION_CSM__SIGN_BYTES +
+                   (size_t) NAION_CSM__X_PK_BYTES +
+                   (size_t) NAION_CSM__NONCE_BYTES +
+                   (size_t) NAION_CSM__MAC_BYTES;
+    if (packet_len <= fixed) {
+        return 0U;
+    }
+    return packet_len - fixed;
+}
+
+size_t naion_csm_server_encrypt_size(size_t plaintext_len) {
+    return (size_t) NAION_CSM__SIGN_BYTES +
+           (size_t) NAION_CSM__X_PK_BYTES +
+           (size_t) NAION_CSM__NONCE_BYTES +
+           (size_t) NAION_CSM__MAC_BYTES +
+           plaintext_len;
+}
+
+size_t naion_csm_server_decrypt_max_plaintext_size(size_t packet_len) {
+    size_t fixed = (size_t) NAION_CSM__SIGN_BYTES +
+                   (size_t) NAION_CSM__X_PK_BYTES +
+                   (size_t) NAION_CSM__NONCE_BYTES +
+                   (size_t) NAION_CSM__MAC_BYTES +
+                   (size_t) NAION_CSM__ED_PK_BYTES;
+    if (packet_len <= fixed) {
+        return 0U;
+    }
+    return packet_len - fixed;
+}
+
+int naion_csm_client_encrypt(
+    const naion_csm_client *client,
+    const uint8_t *plaintext,
+    size_t plaintext_len,
+    uint8_t *out_packet,
+    size_t out_packet_cap,
+    size_t *out_packet_len
+) {
+    uint8_t server_xpk[NAION_CSM__X_PK_BYTES];
+    uint8_t session_xsk[NAION_CSM__X_SK_BYTES];
+    uint8_t session_xpk[NAION_CSM__X_PK_BYTES];
+    uint8_t *sig;
+    uint8_t *body;
+    uint8_t *body_payload;
+    size_t body_payload_len;
+    size_t plain_payload_len;
+    uint8_t *plain_payload = NULL;
+    int ret = NAION_CSM_ERR_CRYPTO;
+
+    if (out_packet_len != NULL) {
+        *out_packet_len = 0U;
+    }
+    if (client == NULL || out_packet == NULL || out_packet_len == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (plaintext == NULL && plaintext_len > 0U) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (plaintext_len == 0U) {
+        return NAION_CSM_ERR_NO_DATA;
+    }
+    if (out_packet_cap < naion_csm_client_encrypt_size(plaintext_len)) {
+        return NAION_CSM_ERR_BUFFER_TOO_SMALL;
+    }
+
+    if (naion_sign_ed25519_pk_to_curve25519(server_xpk, client->server_ed_public_key) != 0) {
+        goto __ERROR__;
+    }
+    if (naion_box_keypair(session_xpk, session_xsk) != 0) {
+        goto __ERROR__;
+    }
+
+    sig = out_packet;
+    body = out_packet + NAION_CSM__SIGN_BYTES;
+    memmove(body, session_xpk, NAION_CSM__X_PK_BYTES);
+    body_payload = body + NAION_CSM__X_PK_BYTES;
+    body_payload_len = (size_t) NAION_CSM__NONCE_BYTES + (size_t) NAION_CSM__MAC_BYTES + (size_t) NAION_CSM__ED_PK_BYTES + plaintext_len;
+    plain_payload_len = (size_t) NAION_CSM__ED_PK_BYTES + plaintext_len;
+    plain_payload = (uint8_t *) malloc(plain_payload_len);
+    if (plain_payload == NULL) {
+        goto __ERROR__;
+    }
+    memmove(plain_payload, client->ed_public_key, NAION_CSM__ED_PK_BYTES);
+    memmove(plain_payload + NAION_CSM__ED_PK_BYTES, plaintext, plaintext_len);
+    if (naion_csm_internal_seal(
+            plain_payload,
+            plain_payload_len,
+            server_xpk,
+            session_xsk,
+            session_xpk,
+            body_payload) != NAION_CSM_OK) {
+        goto __ERROR__;
+    }
+    if (naion_csm_internal_sign(body, (size_t) NAION_CSM__X_PK_BYTES + body_payload_len,
+                                client->ed_secret_key, sig) != NAION_CSM_OK) {
+        goto __ERROR__;
+    }
+    *out_packet_len = naion_csm_client_encrypt_size(plaintext_len);
+    ret = NAION_CSM_OK;
+    goto __FREE__;
+
+__ERROR__:
+    if (plain_payload != NULL) {
+        naion_memzero(plain_payload, plain_payload_len);
+    }
+    naion_memzero(server_xpk, sizeof(server_xpk));
+    naion_memzero(session_xsk, sizeof(session_xsk));
+    naion_memzero(session_xpk, sizeof(session_xpk));
+__FREE__:
+    if (plain_payload != NULL) {
+        free(plain_payload);
+    }
+    return ret;
+}
+
+int naion_csm_client_decrypt(
+    const naion_csm_client *client,
+    const uint8_t *packet,
+    size_t packet_len,
+    uint8_t *out_plaintext,
+    size_t out_plaintext_cap,
+    size_t *out_plaintext_len
+) {
+    size_t min_size = (size_t) NAION_CSM__SIGN_BYTES +
+                      (size_t) NAION_CSM__X_PK_BYTES +
+                      (size_t) NAION_CSM__NONCE_BYTES +
+                      (size_t) NAION_CSM__MAC_BYTES;
+    const uint8_t *sig;
+    const uint8_t *body;
+    const uint8_t *session_xpk;
+    const uint8_t *nonce_cipher;
+    size_t nonce_cipher_len;
+    uint8_t client_xsk[NAION_CSM__X_SK_BYTES];
+    uint8_t *opened_buf = NULL;
+    size_t opened_cap = 0U;
+    size_t plaintext_len = 0;
+    int ret = NAION_CSM_ERR_CRYPTO;
+
+    if (out_plaintext_len != NULL) {
+        *out_plaintext_len = 0U;
+    }
+    if (client == NULL || packet == NULL || out_plaintext == NULL || out_plaintext_len == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (packet_len <= min_size) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (out_plaintext_cap < naion_csm_client_decrypt_max_plaintext_size(packet_len)) {
+        return NAION_CSM_ERR_BUFFER_TOO_SMALL;
+    }
+    sig = packet;
+    body = packet + NAION_CSM__SIGN_BYTES;
+    if (naion_csm_internal_verify(sig, body, packet_len - (size_t) NAION_CSM__SIGN_BYTES,
+                                  client->server_ed_public_key) != NAION_CSM_OK) {
+        return NAION_CSM_ERR_VERIFY_FAILED;
+    }
+    if (naion_sign_ed25519_sk_to_curve25519(client_xsk, client->ed_secret_key) != 0) {
+        goto __ERROR__;
+    }
+    session_xpk = body;
+    nonce_cipher = body + NAION_CSM__X_PK_BYTES;
+    nonce_cipher_len = packet_len - (size_t) NAION_CSM__SIGN_BYTES - (size_t) NAION_CSM__X_PK_BYTES;
+    opened_cap = packet_len -
+                 (size_t) NAION_CSM__SIGN_BYTES -
+                 (size_t) NAION_CSM__X_PK_BYTES -
+                 (size_t) NAION_CSM__NONCE_BYTES -
+                 (size_t) NAION_CSM__MAC_BYTES;
+    opened_buf = (uint8_t *) malloc(opened_cap);
+    if (opened_buf == NULL) {
+        goto __ERROR__;
+    }
+    if (naion_csm_internal_open(
+            nonce_cipher,
+            nonce_cipher_len,
+            session_xpk,
+            client_xsk,
+            session_xpk,
+            opened_buf,
+            &plaintext_len) != NAION_CSM_OK) {
+        goto __ERROR__;
+    }
+    memmove(out_plaintext, opened_buf, plaintext_len);
+    *out_plaintext_len = plaintext_len;
+    ret = NAION_CSM_OK;
+    goto __FREE__;
+
+__ERROR__:
+    if (opened_buf != NULL) {
+        naion_memzero(opened_buf, opened_cap);
+    }
+    naion_memzero(client_xsk, sizeof(client_xsk));
+__FREE__:
+    if (opened_buf != NULL) {
+        free(opened_buf);
+    }
+    return ret;
+}
+
+int naion_csm_server_decrypt(
+    naion_csm_server *server,
+    const uint8_t *packet,
+    size_t packet_len,
+    uint8_t *out_plaintext,
+    size_t out_plaintext_cap,
+    size_t *out_plaintext_len
+) {
+    size_t min_size = (size_t) NAION_CSM__SIGN_BYTES +
+                      (size_t) NAION_CSM__X_PK_BYTES +
+                      (size_t) NAION_CSM__NONCE_BYTES +
+                      (size_t) NAION_CSM__MAC_BYTES +
+                      (size_t) NAION_CSM__ED_PK_BYTES;
+    const uint8_t *sig;
+    const uint8_t *body;
+    const uint8_t *session_xpk;
+    const uint8_t *nonce_cipher;
+    size_t nonce_cipher_len;
+    uint8_t server_xsk[NAION_CSM__X_SK_BYTES];
+    uint8_t client_ed_public_key[NAION_CSM__ED_PK_BYTES];
+    uint8_t *opened_buf = NULL;
+    size_t opened_cap = 0U;
+    size_t opened_len = 0;
+    int ret = NAION_CSM_ERR_CRYPTO;
+
+    if (out_plaintext_len != NULL) {
+        *out_plaintext_len = 0U;
+    }
+    if (server == NULL || packet == NULL || out_plaintext == NULL || out_plaintext_len == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (packet_len <= min_size) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (out_plaintext_cap < naion_csm_server_decrypt_max_plaintext_size(packet_len)) {
+        return NAION_CSM_ERR_BUFFER_TOO_SMALL;
+    }
+    if (naion_sign_ed25519_sk_to_curve25519(server_xsk, server->ed_secret_key) != 0) {
+        goto __ERROR__;
+    }
+    sig = packet;
+    body = packet + NAION_CSM__SIGN_BYTES;
+    session_xpk = body;
+    nonce_cipher = body + NAION_CSM__X_PK_BYTES;
+    nonce_cipher_len = packet_len - (size_t) NAION_CSM__SIGN_BYTES - (size_t) NAION_CSM__X_PK_BYTES;
+    opened_cap = nonce_cipher_len - (size_t) NAION_CSM__NONCE_BYTES - (size_t) NAION_CSM__MAC_BYTES;
+    opened_buf = (uint8_t *) malloc(opened_cap);
+    if (opened_buf == NULL) {
+        goto __ERROR__;
+    }
+
+    if (naion_csm_internal_open(
+            nonce_cipher,
+            nonce_cipher_len,
+            session_xpk,
+            server_xsk,
+            session_xpk,
+            opened_buf,
+            &opened_len) != NAION_CSM_OK) {
+        goto __ERROR__;
+    }
+    if (opened_len <= (size_t) NAION_CSM__ED_PK_BYTES) {
+        goto __ERROR__;
+    }
+
+    memmove(client_ed_public_key, opened_buf, NAION_CSM__ED_PK_BYTES);
+    if (naion_csm_internal_verify(sig, body, packet_len - (size_t) NAION_CSM__SIGN_BYTES,
+                                  client_ed_public_key) != NAION_CSM_OK) {
+        goto __ERROR__;
+    }
+    memmove(server->client_ed_public_key, client_ed_public_key, NAION_CSM__ED_PK_BYTES);
+    server->client_public_key_initialized = 1;
+    memmove(
+        out_plaintext,
+        opened_buf + NAION_CSM__ED_PK_BYTES,
+        opened_len - (size_t) NAION_CSM__ED_PK_BYTES
+    );
+    *out_plaintext_len = opened_len - (size_t) NAION_CSM__ED_PK_BYTES;
+    ret = NAION_CSM_OK;
+    goto __FREE__;
+
+__ERROR__:
+    if (opened_buf != NULL) {
+        naion_memzero(opened_buf, opened_cap);
+    }
+    naion_memzero(client_ed_public_key, sizeof(client_ed_public_key));
+    naion_memzero(server_xsk, sizeof(server_xsk));
+__FREE__:
+    if (opened_buf != NULL) {
+        free(opened_buf);
+    }
+    return ret;
+}
+
+int naion_csm_server_encrypt(
+    const naion_csm_server *server,
+    const uint8_t *plaintext,
+    size_t plaintext_len,
+    uint8_t *out_packet,
+    size_t out_packet_cap,
+    size_t *out_packet_len
+) {
+    uint8_t client_xpk[NAION_CSM__X_PK_BYTES];
+    uint8_t session_xsk[NAION_CSM__X_SK_BYTES];
+    uint8_t session_xpk[NAION_CSM__X_PK_BYTES];
+    uint8_t *sig;
+    uint8_t *body;
+    uint8_t *body_payload;
+    size_t body_payload_len;
+    int ret = NAION_CSM_ERR_CRYPTO;
+
+    if (out_packet_len != NULL) {
+        *out_packet_len = 0U;
+    }
+    if (server == NULL || out_packet == NULL || out_packet_len == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (plaintext == NULL && plaintext_len > 0U) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (plaintext_len == 0U) {
+        return NAION_CSM_ERR_NO_DATA;
+    }
+    if (!server->client_public_key_initialized) {
+        return NAION_CSM_ERR_STATE;
+    }
+    if (out_packet_cap < naion_csm_server_encrypt_size(plaintext_len)) {
+        return NAION_CSM_ERR_BUFFER_TOO_SMALL;
+    }
+    if (naion_sign_ed25519_pk_to_curve25519(client_xpk, server->client_ed_public_key) != 0) {
+        goto __ERROR__;
+    }
+    if (naion_box_keypair(session_xpk, session_xsk) != 0) {
+        goto __ERROR__;
+    }
+
+    sig = out_packet;
+    body = out_packet + NAION_CSM__SIGN_BYTES;
+    memmove(body, session_xpk, NAION_CSM__X_PK_BYTES);
+    body_payload = body + NAION_CSM__X_PK_BYTES;
+    body_payload_len = (size_t) NAION_CSM__NONCE_BYTES + (size_t) NAION_CSM__MAC_BYTES + plaintext_len;
+    if (naion_csm_internal_seal(
+            plaintext,
+            plaintext_len,
+            client_xpk,
+            session_xsk,
+            session_xpk,
+            body_payload) != NAION_CSM_OK) {
+        goto __ERROR__;
+    }
+    if (naion_csm_internal_sign(body, (size_t) NAION_CSM__X_PK_BYTES + body_payload_len,
+                                server->ed_secret_key, sig) != NAION_CSM_OK) {
+        goto __ERROR__;
+    }
+    *out_packet_len = naion_csm_server_encrypt_size(plaintext_len);
+    ret = NAION_CSM_OK;
+    goto __FREE__;
+
+__ERROR__:
+    naion_memzero(client_xpk, sizeof(client_xpk));
+    naion_memzero(session_xsk, sizeof(session_xsk));
+    naion_memzero(session_xpk, sizeof(session_xpk));
+__FREE__:
+    return ret;
+}
+
+#endif /* NAION_LAYER_CSM */
+
+/* ========================================================================= */
+/* Layer 4 implementations — CSM + CA-certificate handshake                */
+/* ========================================================================= */
+#if NAION_LAYER_CSM_CA
+
+int naion_csm_ca_client_create(naion_csm_ca_client *client,
+                                const uint8_t ed_seed[naion_sign_ed25519_SEEDBYTES],
+                                const uint8_t ca_ed_pk[naion_sign_ed25519_PUBLICKEYBYTES]) {
+    int ret;
+    if (client == NULL || ed_seed == NULL || ca_ed_pk == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    memset(client, 0, sizeof(*client));
+    memmove(client->ed_seed, ed_seed, naion_sign_ed25519_SEEDBYTES);
+    memmove(client->ca_ed_public_key, ca_ed_pk, naion_sign_ed25519_PUBLICKEYBYTES);
+    ret = naion_sign_ed25519_seed_keypair(
+        client->ed_public_key, client->ed_secret_key, client->ed_seed);
+    client->server_key_verified = 0;
+    return (ret == 0) ? NAION_CSM_OK : NAION_CSM_ERR_CRYPTO;
+}
+
+int naion_csm_ca_server_create(naion_csm_ca_server *server,
+                                const uint8_t ed_seed[naion_sign_ed25519_SEEDBYTES],
+                                const uint8_t ca_signature[naion_sign_ed25519_BYTES]) {
+    int ret;
+    if (server == NULL || ed_seed == NULL || ca_signature == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    memset(server, 0, sizeof(*server));
+    memmove(server->ed_seed, ed_seed, naion_sign_ed25519_SEEDBYTES);
+    memmove(server->ca_signature, ca_signature, naion_sign_ed25519_BYTES);
+    ret = naion_sign_ed25519_seed_keypair(
+        server->ed_public_key, server->ed_secret_key, server->ed_seed);
+    server->client_key_verified = 0;
+    return (ret == 0) ? NAION_CSM_OK : NAION_CSM_ERR_CRYPTO;
+}
+
+size_t naion_csm_ca_handshake_response_size(void) {
+    return NAION_CSM_CA_CERT_BYTES;
+}
+
+int naion_csm_ca_handshake_response(const naion_csm_ca_server *server,
+                                     uint8_t out_m1[NAION_CSM_CA_CERT_BYTES],
+                                     size_t out_cap, size_t *out_len) {
+    if (out_len != NULL) {
+        *out_len = 0U;
+    }
+    if (server == NULL || out_m1 == NULL || out_len == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (out_cap < NAION_CSM_CA_CERT_BYTES) {
+        return NAION_CSM_ERR_BUFFER_TOO_SMALL;
+    }
+    memmove(out_m1, server->ed_public_key, naion_sign_ed25519_PUBLICKEYBYTES);
+    memmove(out_m1 + naion_sign_ed25519_PUBLICKEYBYTES,
+            server->ca_signature, naion_sign_ed25519_BYTES);
+    *out_len = NAION_CSM_CA_CERT_BYTES;
+    return NAION_CSM_OK;
+}
+
+int naion_csm_ca_handshake_verify(naion_csm_ca_client *client,
+                                   const uint8_t *m1, size_t m1_len) {
+    if (client == NULL || m1 == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (m1_len != NAION_CSM_CA_CERT_BYTES) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (naion_sign_ed25519_verify_detached(
+            m1 + naion_sign_ed25519_PUBLICKEYBYTES,
+            m1,
+            naion_sign_ed25519_PUBLICKEYBYTES,
+            client->ca_ed_public_key) != 0) {
+        return NAION_CSM_ERR_VERIFY_FAILED;
+    }
+    memmove(client->server_ed_public_key, m1, naion_sign_ed25519_PUBLICKEYBYTES);
+    client->server_key_verified = 1;
+    return NAION_CSM_OK;
+}
+
+size_t naion_csm_ca_client_encrypt_size(size_t plaintext_len) {
+    return naion_csm_client_encrypt_size(plaintext_len);
+}
+
+size_t naion_csm_ca_client_decrypt_max_plaintext_size(size_t packet_len) {
+    return naion_csm_client_decrypt_max_plaintext_size(packet_len);
+}
+
+size_t naion_csm_ca_server_encrypt_size(size_t plaintext_len) {
+    return naion_csm_server_encrypt_size(plaintext_len);
+}
+
+size_t naion_csm_ca_server_decrypt_max_plaintext_size(size_t packet_len) {
+    return naion_csm_server_decrypt_max_plaintext_size(packet_len);
+}
+
+int naion_csm_ca_client_encrypt(naion_csm_ca_client *client,
+                                 const uint8_t *plaintext, size_t plaintext_len,
+                                 uint8_t *out, size_t out_cap, size_t *out_len) {
+    naion_csm_client view;
+    int ret;
+    if (client == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (!client->server_key_verified) {
+        if (out_len != NULL) {
+            *out_len = 0U;
+        }
+        return NAION_CSM_ERR_STATE;
+    }
+    /* Reuse the Layer 3 client encryptor over the same key layout. */
+    memmove(view.ed_seed, client->ed_seed, naion_sign_ed25519_SEEDBYTES);
+    memmove(view.ed_secret_key, client->ed_secret_key, naion_sign_ed25519_SECRETKEYBYTES);
+    memmove(view.ed_public_key, client->ed_public_key, naion_sign_ed25519_PUBLICKEYBYTES);
+    memmove(view.server_ed_public_key, client->server_ed_public_key, naion_sign_ed25519_PUBLICKEYBYTES);
+    ret = naion_csm_client_encrypt(&view, plaintext, plaintext_len, out, out_cap, out_len);
+    naion_memzero(&view, sizeof(view));
+    return ret;
+}
+
+int naion_csm_ca_client_decrypt(const naion_csm_ca_client *client,
+                                 const uint8_t *packet, size_t packet_len,
+                                 uint8_t *out, size_t out_cap, size_t *out_len) {
+    naion_csm_client view;
+    int ret;
+    if (client == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (!client->server_key_verified) {
+        if (out_len != NULL) {
+            *out_len = 0U;
+        }
+        return NAION_CSM_ERR_STATE;
+    }
+    memmove(view.ed_seed, client->ed_seed, naion_sign_ed25519_SEEDBYTES);
+    memmove(view.ed_secret_key, client->ed_secret_key, naion_sign_ed25519_SECRETKEYBYTES);
+    memmove(view.ed_public_key, client->ed_public_key, naion_sign_ed25519_PUBLICKEYBYTES);
+    memmove(view.server_ed_public_key, client->server_ed_public_key, naion_sign_ed25519_PUBLICKEYBYTES);
+    ret = naion_csm_client_decrypt(&view, packet, packet_len, out, out_cap, out_len);
+    naion_memzero(&view, sizeof(view));
+    return ret;
+}
+
+int naion_csm_ca_server_encrypt(const naion_csm_ca_server *server,
+                                 const uint8_t *plaintext, size_t plaintext_len,
+                                 uint8_t *out, size_t out_cap, size_t *out_len) {
+    naion_csm_server view;
+    int ret;
+    if (server == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (!server->client_key_verified) {
+        if (out_len != NULL) {
+            *out_len = 0U;
+        }
+        return NAION_CSM_ERR_STATE;
+    }
+    memmove(view.ed_seed, server->ed_seed, naion_sign_ed25519_SEEDBYTES);
+    memmove(view.ed_secret_key, server->ed_secret_key, naion_sign_ed25519_SECRETKEYBYTES);
+    memmove(view.ed_public_key, server->ed_public_key, naion_sign_ed25519_PUBLICKEYBYTES);
+    memmove(view.client_ed_public_key, server->client_ed_public_key, naion_sign_ed25519_PUBLICKEYBYTES);
+    view.client_public_key_initialized = server->client_key_verified;
+    ret = naion_csm_server_encrypt(&view, plaintext, plaintext_len, out, out_cap, out_len);
+    naion_memzero(&view, sizeof(view));
+    return ret;
+}
+
+int naion_csm_ca_server_decrypt(naion_csm_ca_server *server,
+                                 const uint8_t *packet, size_t packet_len,
+                                 uint8_t *out, size_t out_cap, size_t *out_len) {
+    naion_csm_server view;
+    int ret;
+    if (server == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    memmove(view.ed_seed, server->ed_seed, naion_sign_ed25519_SEEDBYTES);
+    memmove(view.ed_secret_key, server->ed_secret_key, naion_sign_ed25519_SECRETKEYBYTES);
+    memmove(view.ed_public_key, server->ed_public_key, naion_sign_ed25519_PUBLICKEYBYTES);
+    memmove(view.client_ed_public_key, server->client_ed_public_key, naion_sign_ed25519_PUBLICKEYBYTES);
+    view.client_public_key_initialized = server->client_key_verified;
+    ret = naion_csm_server_decrypt(&view, packet, packet_len, out, out_cap, out_len);
+    /* Reflect any client key learnt from the first packet back to the CA server. */
+    memmove(server->client_ed_public_key, view.client_ed_public_key, naion_sign_ed25519_PUBLICKEYBYTES);
+    server->client_key_verified = view.client_public_key_initialized;
+    naion_memzero(&view, sizeof(view));
+    return ret;
+}
+
+void naion_csm_ca_client_wipe(naion_csm_ca_client *client) {
+    if (client != NULL) {
+        naion_memzero(client, sizeof(*client));
+    }
+}
+
+void naion_csm_ca_server_wipe(naion_csm_ca_server *server) {
+    if (server != NULL) {
+        naion_memzero(server, sizeof(*server));
+    }
+}
+
+#endif /* NAION_LAYER_CSM_CA */
+
+/* ========================================================================= */
+/* Layer 5 implementations — CSM-Session (ephemeral-ephemeral DH, PFS)      */
+/* ========================================================================= */
+#if NAION_LAYER_CSM_SESSION
+
+/*
+ * Packet layout (post-handshake):
+ *   [0..63]   Ed25519 detached signature over body
+ *   [64..87]  24-byte XChaCha20-Poly1305 nonce
+ *   [88..103] 16-byte Poly1305 MAC
+ *   [104..]   ciphertext (same length as plaintext)
+ *
+ * Both sides hold the other's Ed25519 public key from the handshake, so decrypt
+ * is verify-then-AEAD symmetrically (no decrypt-then-verify as in Layer 3/4).
+ */
+
+int naion_csm_sess_client_create(
+    naion_csm_sess_client *client,
+    const uint8_t ed_seed[naion_sign_ed25519_SEEDBYTES],
+    const uint8_t ca_ed_pk[naion_sign_ed25519_PUBLICKEYBYTES]) {
+    int ret;
+    if (client == NULL || ed_seed == NULL || ca_ed_pk == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    memset(client, 0, sizeof(*client));
+    memmove(client->ed_seed, ed_seed, naion_sign_ed25519_SEEDBYTES);
+    memmove(client->ca_ed_public_key, ca_ed_pk, naion_sign_ed25519_PUBLICKEYBYTES);
+    ret = naion_sign_ed25519_seed_keypair(
+        client->ed_public_key, client->ed_secret_key, client->ed_seed);
+    client->handshake_complete = 0;
+    return (ret == 0) ? NAION_CSM_OK : NAION_CSM_ERR_CRYPTO;
+}
+
+int naion_csm_sess_server_create(
+    naion_csm_sess_server *server,
+    const uint8_t ed_seed[naion_sign_ed25519_SEEDBYTES],
+    const uint8_t ca_signature[naion_sign_ed25519_BYTES]) {
+    int ret;
+    if (server == NULL || ed_seed == NULL || ca_signature == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    memset(server, 0, sizeof(*server));
+    memmove(server->ed_seed, ed_seed, naion_sign_ed25519_SEEDBYTES);
+    memmove(server->ca_signature, ca_signature, naion_sign_ed25519_BYTES);
+    ret = naion_sign_ed25519_seed_keypair(
+        server->ed_public_key, server->ed_secret_key, server->ed_seed);
+    server->handshake_complete = 0;
+    return (ret == 0) ? NAION_CSM_OK : NAION_CSM_ERR_CRYPTO;
+}
+
+void naion_csm_sess_client_wipe(naion_csm_sess_client *client) {
+    if (client != NULL) {
+        naion_memzero(client, sizeof(*client));
+    }
+}
+
+void naion_csm_sess_server_wipe(naion_csm_sess_server *server) {
+    if (server != NULL) {
+        naion_memzero(server, sizeof(*server));
+    }
+}
+
+/*
+ * Derive the session AEAD key from the ephemeral X25519 shared secret.
+ * naion_box_curve25519xchacha20poly1305_beforenm computes
+ *   HChaCha20(X25519(my_xsk, peer_xpk), zero_nonce)
+ * which matches the plan03 §4.5 session_aead_key definition exactly.
+ */
+static int
+naion_csm_sess_derive_aead_key(uint8_t aead_key[NAION_CSM_SESS_SESSION_AEAD_KEY_BYTES],
+                                const uint8_t my_xsk[NAION_CSM_SESS_SESSION_XSK_BYTES],
+                                const uint8_t peer_xpk[NAION_CSM_SESS_SESSION_XPK_BYTES]) {
+    int ret = naion_box_curve25519xchacha20poly1305_beforenm(aead_key, peer_xpk, my_xsk);
+    if (ret != 0) {
+        naion_memzero(aead_key, NAION_CSM_SESS_SESSION_AEAD_KEY_BYTES);
+        return NAION_CSM_ERR_CRYPTO;
+    }
+    return NAION_CSM_OK;
+}
+
+/* CLIENT_HELLO = client_session_xpk(32) || client_ed_pk(32) || sig(64) */
+int naion_csm_sess_client_hello(
+    naion_csm_sess_client *client,
+    uint8_t out_client_hello[NAION_CSM_SESS_CLIENT_HELLO_BYTES]) {
+    int ret = NAION_CSM_ERR_CRYPTO;
+    uint8_t sig[naion_sign_ed25519_BYTES];
+    unsigned long long sig_len = 0ULL;
+
+    if (client == NULL || out_client_hello == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (naion_box_keypair(client->client_session_xpk, client->client_session_xsk) != 0) {
+        return NAION_CSM_ERR_CRYPTO;
+    }
+    memmove(out_client_hello, client->client_session_xpk, NAION_CSM_SESS_SESSION_XPK_BYTES);
+    memmove(out_client_hello + NAION_CSM_SESS_SESSION_XPK_BYTES,
+            client->ed_public_key, naion_sign_ed25519_PUBLICKEYBYTES);
+    if (naion_sign_ed25519_detached(
+            sig, &sig_len,
+            client->client_session_xpk, (unsigned long long) NAION_CSM_SESS_SESSION_XPK_BYTES,
+            client->ed_secret_key) != 0 ||
+        sig_len != (unsigned long long) naion_sign_ed25519_BYTES) {
+        goto __ERROR__;
+    }
+    memmove(out_client_hello + NAION_CSM_SESS_SESSION_XPK_BYTES + naion_sign_ed25519_PUBLICKEYBYTES,
+            sig, naion_sign_ed25519_BYTES);
+    client->handshake_complete = 0;
+    ret = NAION_CSM_OK;
+    goto __FREE__;
+
+__ERROR__:
+    naion_memzero(client->client_session_xsk, sizeof(client->client_session_xsk));
+    naion_memzero(client->client_session_xpk, sizeof(client->client_session_xpk));
+    naion_memzero(sig, sizeof(sig));
+__FREE__:
+    return ret;
+}
+
+/*
+ * SERVER_RESPONSE (m1) =
+ *   server_session_xpk(32) || sign(server_session_xpk, server_ed_sk)(64) ||
+ *   server_ed_pk(32) || ca_signature(64)
+ *
+ * Verifies the CLIENT_HELLO signature over client_session_xpk with
+ * client_ed_pk first; on failure the server state is left untouched (no session
+ * allocation, plan03 §1.1 step 4 / §6.1).
+ */
+int naion_csm_sess_server_handshake(
+    naion_csm_sess_server *server,
+    const uint8_t client_hello[NAION_CSM_SESS_CLIENT_HELLO_BYTES],
+    uint8_t out_m1[NAION_CSM_SESS_SERVER_RESPONSE_BYTES],
+    size_t out_cap, size_t *out_len) {
+    int ret = NAION_CSM_ERR_CRYPTO;
+    const uint8_t *client_session_xpk;
+    const uint8_t *client_ed_pk;
+    const uint8_t *client_hello_sig;
+    uint8_t sig[naion_sign_ed25519_BYTES];
+    unsigned long long sig_len = 0ULL;
+
+    if (out_len != NULL) {
+        *out_len = 0U;
+    }
+    if (server == NULL || client_hello == NULL || out_m1 == NULL || out_len == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (out_cap < NAION_CSM_SESS_SERVER_RESPONSE_BYTES) {
+        return NAION_CSM_ERR_BUFFER_TOO_SMALL;
+    }
+
+    client_session_xpk = client_hello;
+    client_ed_pk = client_hello + NAION_CSM_SESS_SESSION_XPK_BYTES;
+    client_hello_sig = client_hello + NAION_CSM_SESS_SESSION_XPK_BYTES + naion_sign_ed25519_PUBLICKEYBYTES;
+
+    if (naion_is_zero(client_session_xpk, NAION_CSM_SESS_SESSION_XPK_BYTES)) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (naion_sign_ed25519_verify_detached(
+            client_hello_sig,
+            client_session_xpk, (unsigned long long) NAION_CSM_SESS_SESSION_XPK_BYTES,
+            client_ed_pk) != 0) {
+        return NAION_CSM_ERR_VERIFY_FAILED;
+    }
+
+    if (naion_box_keypair(server->server_session_xpk, server->server_session_xsk) != 0) {
+        return NAION_CSM_ERR_CRYPTO;
+    }
+    if (naion_sign_ed25519_detached(
+            sig, &sig_len,
+            server->server_session_xpk, (unsigned long long) NAION_CSM_SESS_SESSION_XPK_BYTES,
+            server->ed_secret_key) != 0 ||
+        sig_len != (unsigned long long) naion_sign_ed25519_BYTES) {
+        goto __ERROR__;
+    }
+    memmove(out_m1, server->server_session_xpk, NAION_CSM_SESS_SESSION_XPK_BYTES);
+    memmove(out_m1 + NAION_CSM_SESS_SESSION_XPK_BYTES, sig, naion_sign_ed25519_BYTES);
+    memmove(out_m1 + NAION_CSM_SESS_SESSION_XPK_BYTES + naion_sign_ed25519_BYTES,
+            server->ed_public_key, naion_sign_ed25519_PUBLICKEYBYTES);
+    memmove(out_m1 + NAION_CSM_SESS_SESSION_XPK_BYTES + naion_sign_ed25519_BYTES + naion_sign_ed25519_PUBLICKEYBYTES,
+            server->ca_signature, naion_sign_ed25519_BYTES);
+
+    if (naion_csm_sess_derive_aead_key(server->session_aead_key,
+                                        server->server_session_xsk,
+                                        client_session_xpk) != NAION_CSM_OK) {
+        goto __ERROR__;
+    }
+    memmove(server->client_session_xpk, client_session_xpk, NAION_CSM_SESS_SESSION_XPK_BYTES);
+    memmove(server->client_ed_public_key, client_ed_pk, naion_sign_ed25519_PUBLICKEYBYTES);
+    server->handshake_complete = 1;
+
+    *out_len = NAION_CSM_SESS_SERVER_RESPONSE_BYTES;
+    ret = NAION_CSM_OK;
+    goto __FREE__;
+
+__ERROR__:
+    naion_memzero(server->server_session_xsk, sizeof(server->server_session_xsk));
+    naion_memzero(server->server_session_xpk, sizeof(server->server_session_xpk));
+    naion_memzero(server->session_aead_key, sizeof(server->session_aead_key));
+__FREE__:
+    naion_memzero(sig, sizeof(sig));
+    return ret;
+}
+
+/*
+ * Client verifies the two-level certificate chain:
+ *   CA(ca_ed_pk) -> server_ed_pk -> server_session_xpk
+ * then derives the matching session AEAD key.
+ */
+int naion_csm_sess_client_finish(
+    naion_csm_sess_client *client,
+    const uint8_t *m1, size_t m1_len) {
+    const uint8_t *server_session_xpk;
+    const uint8_t *server_sig;
+    const uint8_t *server_ed_pk;
+    const uint8_t *ca_sig;
+
+    if (client == NULL || m1 == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (m1_len != NAION_CSM_SESS_SERVER_RESPONSE_BYTES) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+
+    server_session_xpk = m1;
+    server_sig = m1 + NAION_CSM_SESS_SESSION_XPK_BYTES;
+    server_ed_pk = m1 + NAION_CSM_SESS_SESSION_XPK_BYTES + naion_sign_ed25519_BYTES;
+    ca_sig = m1 + NAION_CSM_SESS_SESSION_XPK_BYTES + naion_sign_ed25519_BYTES + naion_sign_ed25519_PUBLICKEYBYTES;
+
+    if (naion_is_zero(server_session_xpk, NAION_CSM_SESS_SESSION_XPK_BYTES)) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    /* CA -> server_ed_pk */
+    if (naion_sign_ed25519_verify_detached(
+            ca_sig,
+            server_ed_pk, (unsigned long long) naion_sign_ed25519_PUBLICKEYBYTES,
+            client->ca_ed_public_key) != 0) {
+        return NAION_CSM_ERR_VERIFY_FAILED;
+    }
+    /* server_ed_pk -> server_session_xpk */
+    if (naion_sign_ed25519_verify_detached(
+            server_sig,
+            server_session_xpk, (unsigned long long) NAION_CSM_SESS_SESSION_XPK_BYTES,
+            server_ed_pk) != 0) {
+        return NAION_CSM_ERR_VERIFY_FAILED;
+    }
+
+    if (naion_csm_sess_derive_aead_key(client->session_aead_key,
+                                        client->client_session_xsk,
+                                        server_session_xpk) != NAION_CSM_OK) {
+        return NAION_CSM_ERR_CRYPTO;
+    }
+    memmove(client->server_session_xpk, server_session_xpk, NAION_CSM_SESS_SESSION_XPK_BYTES);
+    memmove(client->server_ed_public_key, server_ed_pk, naion_sign_ed25519_PUBLICKEYBYTES);
+    client->handshake_complete = 1;
+    return NAION_CSM_OK;
+}
+
+size_t naion_csm_sess_client_encrypt_size(size_t plaintext_len) {
+    return (size_t) NAION_CSM_SESS_PACKET_OVERHEAD + plaintext_len;
+}
+
+size_t naion_csm_sess_client_decrypt_max_plaintext_size(size_t packet_len) {
+    if (packet_len <= (size_t) NAION_CSM_SESS_PACKET_OVERHEAD) {
+        return 0U;
+    }
+    return packet_len - (size_t) NAION_CSM_SESS_PACKET_OVERHEAD;
+}
+
+size_t naion_csm_sess_server_encrypt_size(size_t plaintext_len) {
+    return (size_t) NAION_CSM_SESS_PACKET_OVERHEAD + plaintext_len;
+}
+
+size_t naion_csm_sess_server_decrypt_max_plaintext_size(size_t packet_len) {
+    if (packet_len <= (size_t) NAION_CSM_SESS_PACKET_OVERHEAD) {
+        return 0U;
+    }
+    return packet_len - (size_t) NAION_CSM_SESS_PACKET_OVERHEAD;
+}
+
+/* Internal: AEAD-encrypt with the precomputed session key, no DH. */
+static int
+naion_csm_sess_seal(const uint8_t *plaintext, size_t plaintext_len,
+                     const uint8_t aead_key[NAION_CSM_SESS_SESSION_AEAD_KEY_BYTES],
+                     uint8_t *out_nonce_mac_ct) {
+    int ret;
+    uint8_t nonce[naion_box_NONCEBYTES_MAX];
+    unsigned long long mac_len = 0ULL;
+    uint8_t *out_mac;
+    uint8_t *out_ct;
+
+    ret = naion_csm_internal_randombytes(nonce, sizeof(nonce));
+    if (ret != NAION_CSM_OK) {
+        return ret;
+    }
+    memmove(out_nonce_mac_ct, nonce, sizeof(nonce));
+    out_mac = out_nonce_mac_ct + naion_box_NONCEBYTES_MAX;
+    out_ct = out_nonce_mac_ct + naion_box_NONCEBYTES_MAX + naion_box_MACBYTES_MAX;
+    ret = naion_aead_xchacha20poly1305_ietf_encrypt_detached(
+        out_ct, out_mac, &mac_len,
+        plaintext, (unsigned long long) plaintext_len,
+        NULL, 0ULL, NULL, nonce, aead_key);
+    naion_memzero(nonce, sizeof(nonce));
+    if (ret != 0 || mac_len != (unsigned long long) naion_box_MACBYTES_MAX) {
+        return NAION_CSM_ERR_CRYPTO;
+    }
+    return NAION_CSM_OK;
+}
+
+/* Internal: AEAD-decrypt with the precomputed session key, no DH. */
+static int
+naion_csm_sess_open(const uint8_t *nonce_mac_ct, size_t nonce_mac_ct_len,
+                     const uint8_t aead_key[NAION_CSM_SESS_SESSION_AEAD_KEY_BYTES],
+                     uint8_t *out_plaintext, size_t *out_plaintext_len) {
+    int ret;
+    const uint8_t *nonce;
+    const uint8_t *mac;
+    const uint8_t *ct;
+    size_t plaintext_len;
+
+    if (nonce_mac_ct_len <= (size_t)(naion_box_NONCEBYTES_MAX + naion_box_MACBYTES_MAX)) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    plaintext_len = nonce_mac_ct_len - (size_t) naion_box_NONCEBYTES_MAX - (size_t) naion_box_MACBYTES_MAX;
+    nonce = nonce_mac_ct;
+    mac = nonce_mac_ct + naion_box_NONCEBYTES_MAX;
+    ct = nonce_mac_ct + naion_box_NONCEBYTES_MAX + naion_box_MACBYTES_MAX;
+    ret = naion_aead_xchacha20poly1305_ietf_decrypt_detached(
+        out_plaintext, NULL,
+        ct, (unsigned long long) plaintext_len,
+        mac, NULL, 0ULL, nonce, aead_key);
+    if (ret != 0) {
+        return NAION_CSM_ERR_CRYPTO;
+    }
+    *out_plaintext_len = plaintext_len;
+    return NAION_CSM_OK;
+}
+
+int naion_csm_sess_client_encrypt(
+    naion_csm_sess_client *client,
+    const uint8_t *plaintext, size_t plaintext_len,
+    uint8_t *out, size_t out_cap, size_t *out_len) {
+    uint8_t *sig;
+    uint8_t *body;
+    size_t body_len;
+
+    if (out_len != NULL) {
+        *out_len = 0U;
+    }
+    if (client == NULL || out == NULL || out_len == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (plaintext == NULL && plaintext_len > 0U) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (plaintext_len == 0U) {
+        return NAION_CSM_ERR_NO_DATA;
+    }
+    if (!client->handshake_complete) {
+        return NAION_CSM_ERR_STATE;
+    }
+    if (out_cap < naion_csm_sess_client_encrypt_size(plaintext_len)) {
+        return NAION_CSM_ERR_BUFFER_TOO_SMALL;
+    }
+
+    sig = out;
+    body = out + naion_sign_ed25519_BYTES;
+    body_len = (size_t) naion_box_NONCEBYTES_MAX + (size_t) naion_box_MACBYTES_MAX + plaintext_len;
+    if (naion_csm_sess_seal(plaintext, plaintext_len, client->session_aead_key, body) != NAION_CSM_OK) {
+        return NAION_CSM_ERR_CRYPTO;
+    }
+    if (naion_csm_internal_sign(body, body_len, client->ed_secret_key, sig) != NAION_CSM_OK) {
+        naion_memzero(body, body_len);
+        return NAION_CSM_ERR_CRYPTO;
+    }
+    *out_len = naion_csm_sess_client_encrypt_size(plaintext_len);
+    return NAION_CSM_OK;
+}
+
+int naion_csm_sess_client_decrypt(
+    const naion_csm_sess_client *client,
+    const uint8_t *packet, size_t packet_len,
+    uint8_t *out, size_t out_cap, size_t *out_len) {
+    const uint8_t *sig;
+    const uint8_t *body;
+    size_t body_len;
+    size_t plaintext_len = 0U;
+    int ret = NAION_CSM_ERR_CRYPTO;
+
+    if (out_len != NULL) {
+        *out_len = 0U;
+    }
+    if (client == NULL || packet == NULL || out == NULL || out_len == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (!client->handshake_complete) {
+        return NAION_CSM_ERR_STATE;
+    }
+    if (packet_len <= (size_t) NAION_CSM_SESS_PACKET_OVERHEAD) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (out_cap < naion_csm_sess_client_decrypt_max_plaintext_size(packet_len)) {
+        return NAION_CSM_ERR_BUFFER_TOO_SMALL;
+    }
+
+    sig = packet;
+    body = packet + naion_sign_ed25519_BYTES;
+    body_len = packet_len - (size_t) naion_sign_ed25519_BYTES;
+    /* verify-then-decrypt: cheap reject of forged packets before any AEAD work */
+    if (naion_csm_internal_verify(sig, body, body_len, client->server_ed_public_key) != NAION_CSM_OK) {
+        return NAION_CSM_ERR_VERIFY_FAILED;
+    }
+    ret = naion_csm_sess_open(body, body_len, client->session_aead_key, out, &plaintext_len);
+    if (ret != NAION_CSM_OK) {
+        return ret;
+    }
+    *out_len = plaintext_len;
+    return NAION_CSM_OK;
+}
+
+int naion_csm_sess_server_encrypt(
+    const naion_csm_sess_server *server,
+    const uint8_t *plaintext, size_t plaintext_len,
+    uint8_t *out, size_t out_cap, size_t *out_len) {
+    uint8_t *sig;
+    uint8_t *body;
+    size_t body_len;
+
+    if (out_len != NULL) {
+        *out_len = 0U;
+    }
+    if (server == NULL || out == NULL || out_len == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (plaintext == NULL && plaintext_len > 0U) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (plaintext_len == 0U) {
+        return NAION_CSM_ERR_NO_DATA;
+    }
+    if (!server->handshake_complete) {
+        return NAION_CSM_ERR_STATE;
+    }
+    if (out_cap < naion_csm_sess_server_encrypt_size(plaintext_len)) {
+        return NAION_CSM_ERR_BUFFER_TOO_SMALL;
+    }
+
+    sig = out;
+    body = out + naion_sign_ed25519_BYTES;
+    body_len = (size_t) naion_box_NONCEBYTES_MAX + (size_t) naion_box_MACBYTES_MAX + plaintext_len;
+    if (naion_csm_sess_seal(plaintext, plaintext_len, server->session_aead_key, body) != NAION_CSM_OK) {
+        return NAION_CSM_ERR_CRYPTO;
+    }
+    if (naion_csm_internal_sign(body, body_len, server->ed_secret_key, sig) != NAION_CSM_OK) {
+        naion_memzero(body, body_len);
+        return NAION_CSM_ERR_CRYPTO;
+    }
+    *out_len = naion_csm_sess_server_encrypt_size(plaintext_len);
+    return NAION_CSM_OK;
+}
+
+int naion_csm_sess_server_decrypt(
+    naion_csm_sess_server *server,
+    const uint8_t *packet, size_t packet_len,
+    uint8_t *out, size_t out_cap, size_t *out_len) {
+    const uint8_t *sig;
+    const uint8_t *body;
+    size_t body_len;
+    size_t plaintext_len = 0U;
+    int ret = NAION_CSM_ERR_CRYPTO;
+
+    if (out_len != NULL) {
+        *out_len = 0U;
+    }
+    if (server == NULL || packet == NULL || out == NULL || out_len == NULL) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (!server->handshake_complete) {
+        return NAION_CSM_ERR_STATE;
+    }
+    if (packet_len <= (size_t) NAION_CSM_SESS_PACKET_OVERHEAD) {
+        return NAION_CSM_ERR_INVALID_ARGUMENT;
+    }
+    if (out_cap < naion_csm_sess_server_decrypt_max_plaintext_size(packet_len)) {
+        return NAION_CSM_ERR_BUFFER_TOO_SMALL;
+    }
+
+    sig = packet;
+    body = packet + naion_sign_ed25519_BYTES;
+    body_len = packet_len - (size_t) naion_sign_ed25519_BYTES;
+    if (naion_csm_internal_verify(sig, body, body_len, server->client_ed_public_key) != NAION_CSM_OK) {
+        return NAION_CSM_ERR_VERIFY_FAILED;
+    }
+    ret = naion_csm_sess_open(body, body_len, server->session_aead_key, out, &plaintext_len);
+    if (ret != NAION_CSM_OK) {
+        return ret;
+    }
+    *out_len = plaintext_len;
+    return NAION_CSM_OK;
+}
+
+#endif /* NAION_LAYER_CSM_SESSION */
+>>>>>>> dev-merge
 
 #endif /* NAION_IMPLEMENTATION */
 #endif /* NAION_H */

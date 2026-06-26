@@ -1,241 +1,119 @@
 #ifndef CPL_WIN32_SERVICE_HPP_BUFFER_AROUND_BUFFER_BORDER_ANIMAL_BREATH_BRIGHT_ACTIVE
 #define CPL_WIN32_SERVICE_HPP_BUFFER_AROUND_BUFFER_BORDER_ANIMAL_BREATH_BRIGHT_ACTIVE
 
+#include <windows.h>
 #include <string>
+#include <cstdio>
 
-#include "../base.hpp"
-#include "../strings.hpp"
-#include "sys.hpp"
+#include "api.hpp"
+
+using namespace std;
 
 namespace cpl {
-    namespace sys {
+    namespace win32 {
         namespace service {
-            class Errors final {
-            public:
-                static constexpr int64_t base = static_cast<int64_t>(0x50) << 32;
-                static constexpr cpl::Error::CodeDef OpenSCManager_ = {base | 1};
-                static constexpr cpl::Error::CodeDef CreateService_ = {base | 2};
-                static constexpr cpl::Error::CodeDef ChangeServiceConfig_ = {base | 3};
-                static constexpr cpl::Error::CodeDef StartService_ = {base | 4};
-                static constexpr cpl::Error::CodeDef OpenService_ = {base | 5};
-                static constexpr cpl::Error::CodeDef QueryServiceStatus_ = {base | 6};
-                static constexpr cpl::Error::CodeDef ControlService_ = {base | 7};
-                static constexpr cpl::Error::CodeDef DeleteService_ = {base | 8};
-            };
-
-            inline Int32Result Install(
-                const std::wstring &ServiceName,
-                const std::wstring &DisplayName,
-                const std::wstring &ExecutePath
+            // 安装服务
+            inline int32_t Install (
+                    const wstring &ServiceName,
+                    const wstring &DisplayName,
+                    const wstring &ExecutePath
             ) {
+                int32_t retCode{};
                 SC_HANDLE scmHandle{};
                 SC_HANDLE serviceHandle{};
 
-                const auto defer = cpl::base::MakeDefer([&]() {
-                    if (serviceHandle) {
-                        CloseServiceHandle(serviceHandle);
-                        serviceHandle = nullptr;
-                    }
-                    if (scmHandle) {
-                        CloseServiceHandle(scmHandle);
-                        scmHandle = nullptr;
-                    }
-                });
-
-                scmHandle = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_ALL_ACCESS);
+                scmHandle = OpenSCManager(nullptr, nullptr, SC_MANAGER_ALL_ACCESS);
                 if (!scmHandle) {
                     const auto e = GetLastError();
-                    auto es = strings::Format(
-                        "[X] OpenSCManagerW error [0x%lx][%s]" CPL_FILE_AND_LINE, e,
-                        sys::FormatError(e).data()
-                    );
-                    if (!es) {
-                        return Err(es.error().Append(CPL_FILE_AND_LINE));
-                    }
-                    return MakeErr(Errors::OpenSCManager_, es.value<>());
+                    fprintf(stderr, "[x] OpenSCManager failed 0x%lx:%s", e, FormatError(e).data());
+                    retCode = static_cast<int32_t>(e);
+                    goto __ERROR__;
                 }
 
                 serviceHandle = CreateServiceW(
-                    scmHandle,
-                    ServiceName.data(),
-                    DisplayName.data(),
-                    SERVICE_ALL_ACCESS,
-                    SERVICE_WIN32_OWN_PROCESS,
-                    SERVICE_AUTO_START,
-                    SERVICE_ERROR_NORMAL,
-                    ExecutePath.data(),
-                    nullptr,
-                    nullptr,
-                    nullptr,
-                    nullptr,
-                    nullptr
+                        scmHandle,
+                        ServiceName.data(),
+                        DisplayName.data(),
+                        SERVICE_ALL_ACCESS,
+                        SERVICE_WIN32_OWN_PROCESS,
+                        SERVICE_AUTO_START,
+                        SERVICE_ERROR_NORMAL,
+                        ExecutePath.data(),
+                        nullptr,
+                        nullptr,
+                        nullptr,
+                        nullptr,
+                        nullptr
                 );
                 if (!serviceHandle) {
                     const auto e = GetLastError();
-                    auto es = strings::Format(
-                        "[X] CreateServiceW error [0x%lx][%s]" CPL_FILE_AND_LINE, e,
-                        sys::FormatError(e).data()
-                    );
-                    if (!es) {
-                        return Err(es.error().Append(CPL_FILE_AND_LINE));
-                    }
-                    return MakeErr(Errors::CreateService_, es.value<>());
+                    fprintf(stderr, "[x] CreateServiceW failed 0x%lx:%s", e, FormatError(e).data());
+                    retCode = static_cast<int32_t>(e);
+                    goto __ERROR__;
                 }
+                wprintf(L"[!] Service <%s> installed successfully!", ServiceName.data());
 
-                SERVICE_FAILURE_ACTIONS failureActions{};
-                SC_ACTION restartAction{};
-                restartAction.Type = SC_ACTION_RESTART;
-                restartAction.Delay = 10000;
-                failureActions.dwResetPeriod = 0;
-                failureActions.cActions = 1;
-                failureActions.lpsaActions = &restartAction;
-
-                if (!ChangeServiceConfig2W(serviceHandle, SERVICE_CONFIG_FAILURE_ACTIONS, &failureActions)) {
-                    const auto e = GetLastError();
-                    auto es = strings::Format(
-                        "[X] ChangeServiceConfig2W error [0x%lx][%s]" CPL_FILE_AND_LINE, e,
-                        sys::FormatError(e).data()
-                    );
-                    if (!es) {
-                        return Err(es.error().Append(CPL_FILE_AND_LINE));
-                    }
-                    return MakeErr(Errors::ChangeServiceConfig_, es.value<>());
-                }
-
-                if (!StartServiceW(serviceHandle, 0, nullptr)) {
-                    const auto e = GetLastError();
-                    if (e != ERROR_SERVICE_ALREADY_RUNNING) {
-                        auto es = strings::Format(
-                            "[X] StartServiceW error [0x%lx][%s]" CPL_FILE_AND_LINE, e,
-                            sys::FormatError(e).data()
-                        );
-                        if (!es) {
-                            return Err(es.error().Append(CPL_FILE_AND_LINE));
-                        }
-                        return MakeErr(Errors::StartService_, es.value<>());
-                    }
-                }
-
-                return 0;
+                goto __FREE__;
+                __ERROR__:
+                PASS;
+                __FREE__:
+                CloseServiceHandle(serviceHandle);
+                CloseServiceHandle(scmHandle);
+                return retCode;
             }
 
-            inline Int32Result Uninstall(const std::wstring &ServiceName) {
+            // 卸载服务
+            inline int32_t Uninstall(const wstring &ServiceName) {
+                int32_t retCode{};
                 SC_HANDLE scmHandle{};
                 SC_HANDLE serviceHandle{};
 
-                const auto defer = cpl::base::MakeDefer([&]() {
-                    if (serviceHandle) {
-                        CloseServiceHandle(serviceHandle);
-                        serviceHandle = nullptr;
-                    }
-                    if (scmHandle) {
-                        CloseServiceHandle(scmHandle);
-                        scmHandle = nullptr;
-                    }
-                });
-
-                scmHandle = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_ALL_ACCESS);
+                scmHandle = OpenSCManager(nullptr, nullptr, SC_MANAGER_ALL_ACCESS);
                 if (!scmHandle) {
                     const auto e = GetLastError();
-                    auto es = strings::Format(
-                        "[X] OpenSCManagerW error [0x%lx][%s]" CPL_FILE_AND_LINE, e,
-                        sys::FormatError(e).data()
-                    );
-                    if (!es) {
-                        return Err(es.error().Append(CPL_FILE_AND_LINE));
-                    }
-                    return MakeErr(Errors::OpenSCManager_, es.value<>());
+                    fprintf(stderr, "[x] OpenSCManager failed 0x%lx:%s", e, FormatError(e).data());
+                    retCode = static_cast<int32_t>(e);
+                    goto __ERROR__;
                 }
-
-                serviceHandle = OpenServiceW(scmHandle, ServiceName.data(),
-                                             SERVICE_STOP | DELETE | SERVICE_QUERY_STATUS);
+                serviceHandle = OpenServiceW(scmHandle, ServiceName.data(), DELETE);
                 if (!serviceHandle) {
                     const auto e = GetLastError();
-                    auto es = strings::Format(
-                        "[X] OpenService_ error [0x%lx][%s]" CPL_FILE_AND_LINE, e,
-                        sys::FormatError(e).data()
-                    );
-                    if (!es) {
-                        return Err(es.error().Append(CPL_FILE_AND_LINE));
-                    }
-                    return MakeErr(Errors::OpenService_, es.value<>());
+                    fprintf(stderr, "[x] OpenServiceW failed 0x%lx:%s", e, FormatError(e).data());
+                    retCode = static_cast<int32_t>(e);
+                    goto __ERROR__;
                 }
+                wprintf(L"[!] Service <%s> uninstalled successfully!", ServiceName.data());
 
-                SERVICE_STATUS_PROCESS ssp{};
-                DWORD bytesNeeded{};
-                if (!QueryServiceStatusEx(
-                    serviceHandle,
-                    SC_STATUS_PROCESS_INFO,
-                    reinterpret_cast<LPBYTE>(&ssp),
-                    sizeof(SERVICE_STATUS_PROCESS),
-                    &bytesNeeded
-                )) {
-                    const auto e = GetLastError();
-                    auto es = strings::Format(
-                        "[X] QueryServiceStatusEx error [0x%lx][%s]" CPL_FILE_AND_LINE, e,
-                        sys::FormatError(e).data()
-                    );
-                    if (!es) {
-                        return Err(es.error().Append(CPL_FILE_AND_LINE));
-                    }
-                    return MakeErr(Errors::QueryServiceStatus_, es.value<>());
-                }
-
-                if (ssp.dwCurrentState != SERVICE_STOPPED) {
-                    if (!ControlService(serviceHandle, SERVICE_CONTROL_STOP,
-                                        reinterpret_cast<LPSERVICE_STATUS>(&ssp))) {
-                        const auto e = GetLastError();
-                        auto es = strings::Format(
-                            "[X] ControlService error [0x%lx][%s]" CPL_FILE_AND_LINE, e,
-                            sys::FormatError(e).data()
-                        );
-                        if (!es) {
-                            return Err(es.error().Append(CPL_FILE_AND_LINE));
-                        }
-                        return MakeErr(Errors::ControlService_, es.value<>());
-                    }
-                    for (int i = 0; i < 60; i++) {
-                        Sleep(1000);
-                        if (!QueryServiceStatusEx(
-                            serviceHandle,
-                            SC_STATUS_PROCESS_INFO,
-                            reinterpret_cast<LPBYTE>(&ssp),
-                            sizeof(SERVICE_STATUS_PROCESS),
-                            &bytesNeeded
-                        )) {
-                            break;
-                        }
-                        if (ssp.dwCurrentState == SERVICE_STOPPED) {
-                            break;
-                        }
-                    }
-                }
-
-                if (!DeleteService(serviceHandle)) {
-                    const auto e = GetLastError();
-                    auto es = strings::Format(
-                        "[X] DeleteService error [0x%lx][%s]" CPL_FILE_AND_LINE, e,
-                        sys::FormatError(e).data()
-                    );
-                    if (!es) {
-                        return Err(es.error().Append(CPL_FILE_AND_LINE));
-                    }
-                    return MakeErr(Errors::DeleteService_, es.value<>());
-                }
-                return 0;
+                goto __FREE__;
+                __ERROR__:
+                PASS;
+                __FREE__:
+                CloseServiceHandle(serviceHandle);
+                CloseServiceHandle(scmHandle);
+                return retCode;
             }
 
+            /**
+             * 前置声明
+             */
             class WindowsService;
 
+            /**
+             * 使用外部类，保存实例等信息
+             */
             class IServiceEventLoop {
                 friend class WindowsService;
 
             protected:
                 mutable WindowsService *mService{};
                 mutable HANDLE stopEvent{};
-
+                // const void (WINAPI *funcServiceCtrlHandler)(DWORD controlCode);
+                // const void (WINAPI *funcServiceMain)(DWORD argc, LPWSTR *argv);
             public:
                 virtual ~IServiceEventLoop() = default;
+
+                // const WindowsService *(*funcGetInstance)();
+                // const void (*funcEventLoop)(){};
 
                 virtual void EventLoop() = 0;
             };
@@ -243,38 +121,30 @@ namespace cpl {
             class WindowsService {
             protected:
                 static IServiceEventLoop *wrapper;
-                std::wstring serviceName{};
+                wstring serviceName{};
                 SERVICE_STATUS serviceStatus{};
                 SERVICE_STATUS_HANDLE serviceStatusHandle{};
 
             public:
                 virtual ~WindowsService() = default;
 
-                explicit WindowsService(const std::wstring &serviceName, IServiceEventLoop *_wrapper) {
+                explicit WindowsService(const wstring &serviceName, IServiceEventLoop *_wrapper) {
                     this->serviceName = serviceName;
                     WindowsService::wrapper = _wrapper;
                     WindowsService::wrapper->mService = this;
                 }
 
-                virtual Int32Result Run() {
-                    const SERVICE_TABLE_ENTRYW serviceTable[] = {
-                        {const_cast<LPWSTR>(serviceName.data()), ServiceMainWrapper},
-                        {nullptr, nullptr}
+                virtual void Run() {
+                    SERVICE_TABLE_ENTRYW serviceTable[] = {
+                            {const_cast<LPWSTR>(serviceName.data()), ServiceMainWrapper},
+                            {nullptr,                                nullptr}
                     };
 
                     if (StartServiceCtrlDispatcherW(serviceTable) == FALSE) {
                         const auto e = GetLastError();
-                        auto es = strings::Format(
-                            "[X] StartServiceCtrlDispatcherW failed [0x%lx][%s]" CPL_FILE_AND_LINE,
-                            e, FormatError(e).data()
-                        );
-                        if (!es) {
-                            return Err(es.error().Append(CPL_FILE_AND_LINE));
-                        }
-                        fprintf(stderr, "%s\n", es.value<>().data());
-                        return MakeErr(e, es.value<>());
+                        fprintf(stderr, "[x] StartServiceCtrlDispatcherW failed 0x%lx:%s\n", e,
+                                FormatError(ERROR_INVALID_FUNCTION).data());
                     }
-                    return ERROR_SUCCESS;
                 }
 
                 static void WINAPI ServiceMainWrapper(DWORD argc, LPWSTR *argv) {
@@ -284,14 +154,20 @@ namespace cpl {
                 }
 
                 virtual void ServiceMain(DWORD argc, LPWSTR *argv) {
+                    // if (nullptr == funcServiceCtrlHandler) {
+                    //     fprintf(stderr, "[x] ERROR_INVALID_FUNCTION 0x%lx:%s\n", ERROR_INVALID_FUNCTION,
+                    //             FormatError(ERROR_INVALID_FUNCTION).data());
+                    //     return;
+                    // }
                     const auto r0 = RegisterServiceCtrlHandlerW(serviceName.data(), ControlHandlerWrapper);
                     if (!r0) {
                         const auto e = GetLastError();
-                        fprintf(stderr, "[X] RegisterServiceCtrlHandler failed 0x%lx:%s\n", e, FormatError(e).data());
+                        fprintf(stderr, "[x] RegisterServiceCtrlHandler failed 0x%lx:%s\n", e, FormatError(e).data());
                         return;
                     }
                     serviceStatusHandle = r0;
 
+                    // 初始化服务状态
                     serviceStatus.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
                     serviceStatus.dwCurrentState = SERVICE_START_PENDING;
                     serviceStatus.dwControlsAccepted = SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN;
@@ -301,6 +177,7 @@ namespace cpl {
                     serviceStatus.dwWaitHint = 0;
                     SetServiceStatus(serviceStatusHandle, &serviceStatus);
 
+                    // 创建停止事件
                     if (wrapper) {
                         wrapper->stopEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
                         if (!wrapper->stopEvent) {
@@ -309,14 +186,23 @@ namespace cpl {
                             return;
                         }
                     }
+                    {
+                        // todo 初始化可以放在这里。
+                    }
 
+
+                    // 初始化完成，服务开始运行
+                    // 标记服务为运行状态
                     serviceStatus.dwCurrentState = SERVICE_RUNNING;
                     SetServiceStatus(serviceStatusHandle, &serviceStatus);
 
+                    // 调用用户提供的事件循环函数
                     if (wrapper) {
                         wrapper->EventLoop();
+                        // funcEventLoop();
                     }
 
+                    // 服务停止
                     serviceStatus.dwCurrentState = SERVICE_STOPPED;
                     SetServiceStatus(serviceStatusHandle, &serviceStatus);
                 }
@@ -333,7 +219,8 @@ namespace cpl {
                         case SERVICE_CONTROL_SHUTDOWN:
                             serviceStatus.dwCurrentState = SERVICE_STOP_PENDING;
                             SetServiceStatus(serviceStatusHandle, &serviceStatus);
-                            SetEvent(wrapper->stopEvent);
+                            SetEvent(wrapper->stopEvent); // 通知服务停止
+                            // 停止事件循环
                             serviceStatus.dwCurrentState = SERVICE_STOPPED;
                             SetServiceStatus(serviceStatusHandle, &serviceStatus);
                             break;
@@ -344,7 +231,331 @@ namespace cpl {
             };
         };
 
-        service::IServiceEventLoop *service::WindowsService::wrapper{};
+        service::IServiceEventLoop *service::WindowsService::wrapper = nullptr;
+
+        // class $Status {
+        // public:
+        //     wstring serviceName{};
+        //     SERVICE_STATUS serviceStatus{};
+        //     SERVICE_STATUS_HANDLE serviceStatusHandle{};
+        // };
+        //
+        // class $Wrapper {
+        // protected:
+        //     $Status status{};
+        //     void (WINAPI *funcServiceCtrlHandler)(DWORD controlCode){};
+        //     void (WINAPI *funcServiceMain)(DWORD argc, LPWSTR *argv){};
+        //     void (*funcEventLoop)(){};
+        //
+        // public:
+        //     void ServiceMain(DWORD argc, LPWSTR* argv) {
+        //         if (nullptr == funcServiceCtrlHandler) {
+        //             fprintf(stderr, "[x] ERROR_INVALID_FUNCTION 0x%lx:%s\n", ERROR_INVALID_FUNCTION, FormatError(ERROR_INVALID_FUNCTION).data());
+        //             return;
+        //         }
+        //         const auto r0= RegisterServiceCtrlHandlerW(status.serviceName.data(), funcServiceCtrlHandler);
+        //         if (!r0) {
+        //             const auto e = GetLastError();
+        //             fprintf(stderr, "[x] RegisterServiceCtrlHandler failed 0x%lx:%s\n", e, FormatError(e).data());
+        //             return;
+        //         }
+        //         status.serviceStatusHandle = r0;
+        //
+        //         status.serviceStatus.dwCurrentState = SERVICE_START_PENDING;
+        //         SetServiceStatus(status.serviceStatusHandle, &status.serviceStatus);
+        //
+        //         {
+        //             // todo 初始化可以放在这里。
+        //         }
+        //         // 初始化完成，服务开始运行
+        //         status.serviceStatus.dwCurrentState = SERVICE_RUNNING;
+        //         SetServiceStatus(status.serviceStatusHandle, &status.serviceStatus);
+        //
+        //         // 调用用户提供的事件循环函数
+        //         if (funcEventLoop) {
+        //             funcEventLoop();
+        //         }
+        //
+        //         // 服务停止
+        //         status.serviceStatus.dwCurrentState = SERVICE_STOPPED;
+        //         SetServiceStatus(status.serviceStatusHandle, &status.serviceStatus);
+        //     }
+        // };
+        //
+        // class WindowsService {
+        // protected:
+        //     $Status status{};
+        //     $Wrapper wrapper{};
+        //
+        //     $Status* (*funcGetInstance)(){};
+        // public:
+        //     virtual int32_t Run() = 0;
+        //     virtual int32_t Stop() = 0;
+        // };
+        //
+        //
+        // class IService {
+        // protected:
+        //     static IService *instance;
+        //
+        //     wstring serviceName{};
+        //     SERVICE_STATUS serviceStatus{};
+        //     SERVICE_STATUS_HANDLE serviceStatusHandle{};
+        //     HANDLE stopEvent = nullptr;
+        //     BOOL isRunning = FALSE;
+        //
+        //     void (WINAPI *funcServiceCtrlHandler)(DWORD controlCode){};
+        //
+        //     void (WINAPI *funcLoop)(DWORD argc, LPWSTR *argv){};
+        //
+        // public:
+        //     virtual ~IService() = default;
+        //
+        //     IService(
+        //         const wstring &serviceName,
+        //         void (WINAPI *funcServiceCtrlHandler)(DWORD),
+        //         void (WINAPI *funcLoop)(DWORD, LPWSTR *)
+        //     ) {
+        //         this->serviceName = serviceName;
+        //         this->funcServiceCtrlHandler = funcServiceCtrlHandler;
+        //         this->funcLoop = funcLoop;
+        //     }
+        //
+        //     const wstring &ServiceName() const {
+        //         return this->serviceName;
+        //     }
+        //
+        //     SERVICE_STATUS &ServiceStatus() {
+        //         return this->serviceStatus;
+        //     }
+        //
+        //     inline SERVICE_STATUS_HANDLE &ServiceStatusHandle() {
+        //         return this->serviceStatusHandle;
+        //     }
+        //
+        //     HANDLE &StopEvent() {
+        //         return this->stopEvent;
+        //     }
+        //
+        //     BOOL &IsRunning() {
+        //         return this->isRunning;
+        //     }
+        //
+        //     static IService *GetInstance() {
+        //         return instance;
+        //     }
+        //
+        //     static void SetInstance(IService &instance) {
+        //         IService::instance = &instance;
+        //     }
+        //
+        //     static int32_t Install(
+        //         const wstring &serviceName,
+        //         const wstring &displayName,
+        //         const wstring &description,
+        //         const wstring &binPath) {
+        //         int32_t retCode = ERROR_SUCCESS;
+        //         SC_HANDLE scmHandle = nullptr;
+        //         SC_HANDLE serviceHandle = nullptr;
+        //         SERVICE_DESCRIPTIONW sd{};
+        //
+        //         scmHandle = OpenSCManager(nullptr, nullptr, SC_MANAGER_ALL_ACCESS);
+        //         if (!scmHandle) {
+        //             const auto e = GetLastError();
+        //             fprintf(stderr, "[x] OpenSCManager failed 0x%lx:[%s]\n", e, FormatError(e).data());
+        //             retCode = static_cast<int32_t>(e);
+        //             goto __ERROR__;
+        //         }
+        //
+        //         serviceHandle = CreateServiceW(
+        //             scmHandle,
+        //             serviceName.data(),
+        //             displayName.data(),
+        //             SERVICE_ALL_ACCESS,
+        //             SERVICE_WIN32_OWN_PROCESS,
+        //             SERVICE_AUTO_START,
+        //             SERVICE_ERROR_NORMAL,
+        //             binPath.data(),
+        //             nullptr,
+        //             nullptr,
+        //             nullptr,
+        //             nullptr,
+        //             nullptr);
+        //         if (!serviceHandle) {
+        //             const auto e = GetLastError();
+        //             fprintf(stderr, "[x] CreateService failed 0x%lx:[%s]\n", e, FormatError(e).data());
+        //             retCode = static_cast<int32_t>(e);
+        //             goto __ERROR__;
+        //         }
+        //         sd.lpDescription = const_cast<LPWSTR>(description.data());
+        //         ChangeServiceConfig2(serviceHandle, SERVICE_CONFIG_DESCRIPTION, &sd);
+        //         fprintf(stdout, "[!] Service installed successfully!\n");
+        //         goto __FREE__;
+        //
+        //     __ERROR__:
+        //         PASS;
+        //     __FREE__:
+        //         if (!serviceHandle) {
+        //             CloseServiceHandle(serviceHandle);
+        //         }
+        //         if (!scmHandle) {
+        //             CloseServiceHandle(scmHandle);
+        //         }
+        //         return retCode;
+        //     }
+        //
+        //     static int32_t Uninstall(const wstring &name) {
+        //         int32_t retCode = ERROR_SUCCESS;
+        //         SC_HANDLE scmHandle{};
+        //         SC_HANDLE serviceHandle{};
+        //
+        //         scmHandle = OpenSCManager(nullptr, nullptr, SC_MANAGER_ALL_ACCESS);
+        //         if (!scmHandle) {
+        //             const auto e = GetLastError();
+        //             fprintf(stderr, "[x] OpenSCManager failed 0x%lx:[%s]\n", e, FormatError(e).data());
+        //             retCode = static_cast<int32_t>(e);
+        //             goto __ERROR__;
+        //         }
+        //
+        //         serviceHandle = OpenServiceW(scmHandle, name.data(), DELETE);
+        //         if (!serviceHandle) {
+        //             const auto e = GetLastError();
+        //             fprintf(stderr, "[x] OpenServiceW failed 0x%lx:[%s]\n", e, FormatError(e).data());
+        //             retCode = static_cast<int32_t>(e);
+        //             goto __ERROR__;
+        //         } {
+        //             const auto r0 = DeleteService(serviceHandle);
+        //             if (!r0) {
+        //                 const auto e = GetLastError();
+        //                 fprintf(stderr, "[x] DeleteService failed 0x%lx:[%s]\n", e, FormatError(e).data());
+        //                 retCode = static_cast<int32_t>(e);
+        //                 goto __ERROR__;
+        //             }
+        //             fprintf(stdout, "[!] Service uninstalled successfully!\n");
+        //         }
+        //         goto __FREE__;
+        //     __ERROR__:
+        //         PASS;
+        //     __FREE__:
+        //         if (!serviceHandle) {
+        //             CloseServiceHandle(serviceHandle);
+        //         }
+        //         if (!scmHandle) {
+        //             CloseServiceHandle(scmHandle);
+        //         }
+        //         return retCode;
+        //     }
+        //
+        //     // 服务控制处理函数
+        //     static void WINAPI DefaultServiceCtrlHandler(DWORD controlCode) {
+        //         auto ptrInstance = IService::GetInstance();
+        //         if (nullptr == ptrInstance) {
+        //             fprintf(stderr, "[x] Service Instance does not exist\n");
+        //             return;
+        //         }
+        //         auto instance = *ptrInstance;
+        //
+        //         switch (controlCode) {
+        //             case SERVICE_CONTROL_STOP:
+        //             case SERVICE_CONTROL_SHUTDOWN:
+        //                 instance.serviceStatus.dwCurrentState = SERVICE_STOP_PENDING;
+        //                 SetServiceStatus(instance.serviceStatusHandle, &instance.serviceStatus);
+        //                 SetEvent(instance.stopEvent); // 通知服务停止
+        //                 break;
+        //             default:
+        //                 break;
+        //         }
+        //     }
+        //
+        //     static void WINAPI DefaultLoop(DWORD argc, LPWSTR *argv) {
+        //         auto ptrInstance = IService::GetInstance();
+        //         if (nullptr == ptrInstance) {
+        //             fprintf(stderr, "[x] Service Instance does not exist\n");
+        //             return;
+        //         }
+        //         auto instance = *ptrInstance;
+        //         auto serviceStatusHandle = instance.ServiceStatusHandle();
+        //         auto serviceStatus = instance.ServiceStatus();
+        //         auto stopEvent = instance.StopEvent();
+        //         // 注册服务控制处理函数
+        //         serviceStatusHandle = RegisterServiceCtrlHandlerW(instance.ServiceName().data(),
+        //                                                           DefaultServiceCtrlHandler);
+        //         if (!serviceStatusHandle) {
+        //             const auto e = GetLastError();
+        //             fprintf(stderr, "[x] RegisterServiceCtrlHandler failed 0x%lx:%s\n", e, FormatError(e).data());
+        //             return;
+        //         }
+        //
+        //         // 初始化服务状态
+        //         serviceStatus.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
+        //         serviceStatus.dwCurrentState = SERVICE_START_PENDING;
+        //         serviceStatus.dwControlsAccepted = SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN;
+        //         serviceStatus.dwWin32ExitCode = NO_ERROR;
+        //         serviceStatus.dwServiceSpecificExitCode = 0;
+        //         serviceStatus.dwCheckPoint = 0;
+        //         serviceStatus.dwWaitHint = 0;
+        //         SetServiceStatus(serviceStatusHandle, &serviceStatus);
+        //
+        //         // 创建停止事件
+        //         stopEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
+        //         if (!stopEvent) {
+        //             serviceStatus.dwCurrentState = SERVICE_STOPPED;
+        //             SetServiceStatus(serviceStatusHandle, &serviceStatus);
+        //             return;
+        //         }
+        //
+        //         // 标记服务为运行状态
+        //         serviceStatus.dwCurrentState = SERVICE_RUNNING;
+        //         SetServiceStatus(serviceStatusHandle, &serviceStatus);
+        //
+        //         // 主循环：每隔 1 秒钟处理事件
+        //         while (WaitForSingleObject(stopEvent, 1000) == WAIT_TIMEOUT) {
+        //             // 获取当前时间
+        //             // auto now = std::chrono::system_clock::now();
+        //             // std::time_t now_time = std::chrono::system_clock::to_time_t(now);
+        //             // std::string timeStr = std::ctime(&now_time);
+        //             // timeStr.pop_back(); // 去掉换行符
+        //
+        //             // // 写入文件
+        //             // std::ofstream logFile("C:\\test.log", std::ios::app);
+        //             // if (logFile.is_open())
+        //             // {
+        //             //     logFile << timeStr << std::endl;
+        //             //     logFile.close();
+        //             // }
+        //         }
+        //
+        //         // 清理资源
+        //         CloseHandle(stopEvent);
+        //
+        //         // 标记服务为停止状态
+        //         serviceStatus.dwCurrentState = SERVICE_STOPPED;
+        //         SetServiceStatus(serviceStatusHandle, &serviceStatus);
+        //     }
+        //
+        //     virtual int32_t DefaultStartTemplate() {
+        //         // 服务表
+        //         const SERVICE_TABLE_ENTRYW serviceTable[] = {
+        //             {
+        //                 const_cast<LPWSTR>(this->serviceName.data()),
+        //                 static_cast<LPSERVICE_MAIN_FUNCTIONW>(DefaultLoop)
+        //             },
+        //             {nullptr, nullptr}
+        //         };
+        //
+        //         // 启动服务
+        //         if (!StartServiceCtrlDispatcherW(serviceTable)) {
+        //             const auto e = GetLastError();
+        //             fprintf(stderr, "[x] StartServiceCtrlDispatcherW failed 0x%lx:%s\n", e, FormatError(e).data());
+        //             return static_cast<int32_t>(e);
+        //         }
+        //         return ERROR_SUCCESS;
+        //     }
+        //
+        //     virtual int32_t Start() = 0;
+        //
+        //     virtual int32_t Stop() = 0;
+        // };
     }
 }
 

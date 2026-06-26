@@ -1,362 +1,344 @@
-#pragma once
+#ifndef CPL_NETWORK_HPP_FLICKER_MIGHTY_BLOSSOM_GLIDE_RHYTHM_PULSE_TURBULENCE_ECHO
+#define CPL_NETWORK_HPP_FLICKER_MIGHTY_BLOSSOM_GLIDE_RHYTHM_PULSE_TURBULENCE_ECHO
 
-#include <cstdint>
-#include <string>
-#include <vector>
-
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
 #include <winsock2.h>
-#include <ws2tcpip.h>
 #include <windows.h>
-#endif
+#include <wininet.h>
+#include <string>
 
-#include "sys.hpp"
 #include "api.hpp"
+#include "crypto.hpp"
+#include "../../ccl-del/vendor/codec/base64.h"
+
+using namespace std;
 
 namespace cpl {
-    namespace sys {
+    namespace win32 {
         namespace network {
-            class Errors final {
-            public:
-                static constexpr int64_t base = static_cast<int64_t>(0x40) << 32;
-                static constexpr cpl::Error::CodeDef InternetCrackUrlA = {base | 1};
-                static constexpr cpl::Error::CodeDef InternetOpenA = {base | 2};
-                static constexpr cpl::Error::CodeDef InternetConnectA = {base | 3};
-                static constexpr cpl::Error::CodeDef HttpOpenRequestA = {base | 4};
-                static constexpr cpl::Error::CodeDef HttpSendRequestA = {base | 5};
-                static constexpr cpl::Error::CodeDef WSAStartup = {base | 6};
-                static constexpr cpl::Error::CodeDef WSASocket_ = {base | 7};
-                static constexpr cpl::Error::CodeDef WSACloseSocket = {base | 8};
-                static constexpr cpl::Error::CodeDef WSASendTo = {base | 9};
-                static constexpr cpl::Error::CodeDef APIUnavailable = {base | 10};
-            };
-
-            inline std::string inet_ntop(const struct sockaddr_in &addr) {
-                static char ip_str[64]{};
-                const auto *pSrc = &addr.sin_addr.s_addr;
-                BYTE *ipBytes{};
-                memmove(&ipBytes, &pSrc, sizeof(void *));
-                snprintf(ip_str, 64, "%hhu.%hhu.%hhu.%hhu", ipBytes[0], ipBytes[1], ipBytes[2], ipBytes[3]);
-                return ip_str;
-            }
-
-            inline Int32Result inet_pton(_Out_ struct sockaddr_in &addr, const std::string &ip) {
-                uint8_t bytes[4]{};
-                const int parsed = sscanf_s(
-                    ip.c_str(),
-                    "%hhu.%hhu.%hhu.%hhu",
-                    &bytes[0], &bytes[1], &bytes[2], &bytes[3]
-                );
-                if (parsed != 4) {
-                    return Err(cpl::Error(cpl::Error::InvalidArgument, "[X] invalid ipv4 format" CPL_FILE_AND_LINE));
-                }
-                const uint32_t ip_host = (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
-                addr.sin_family = AF_INET;
-                addr.sin_addr.s_addr = htonl(ip_host);
-                return 0;
-            }
-
-            inline Result<Stream> HTTPPost(
-                _In_ const std::string &url,
-                _In_ Stream &data
+            inline INT32 SendHTTP(
+                _Out_ string &out,
+                _In_ const string &host,
+                _In_ const UINT16 port,
+                _In_ const string &httpMethod,
+                _In_ const string &httpRequestURL,
+                _In_ const string &httpReferer,
+                _In_ const string &data,
+                _In_ const BOOL https
             ) {
-                Stream out{};
-                constexpr char headers[] = "Content-Type: application/x-www-form-urlencoded";
-                HINTERNET hSession{};
-                HINTERNET hConnect{};
-                HINTERNET hRequest{};
-                URL_COMPONENTSA urlComponents{};
-                std::vector<char> hostName(65536), urlPath(65536);
-
-                const auto *api = &cpl::sys::api::API::Instance();
-                if (!api
-                    || !api->WinINet.InternetCrackUrlA
-                    || !api->WinINet.InternetOpenA
-                    || !api->WinINet.InternetConnectA
-                    || !api->WinINet.HttpOpenRequestA
-                    || !api->WinINet.HttpSendRequestA
-                    || !api->WinINet.InternetReadFile
-                    || !api->WinINet.InternetCloseHandle) {
-                    return Err(cpl::Error(Errors::APIUnavailable, "api->WinINet.*" CPL_FILE_AND_LINE));
-                }
-
-                const auto defer = base::MakeDefer([&]() {
-                    if (nullptr != hRequest) {
-                        api->WinINet.InternetCloseHandle(hRequest);
-                        hRequest = nullptr;
-                    }
-                    if (nullptr != hConnect) {
-                        api->WinINet.InternetCloseHandle(hConnect);
-                        hConnect = nullptr;
-                    }
-                    if (nullptr != hSession) {
-                        api->WinINet.InternetCloseHandle(hSession);
-                        hSession = nullptr;
-                    }
-                });
-
-                urlComponents.dwStructSize = sizeof(urlComponents);
-                urlComponents.lpszHostName = hostName.data();
-                urlComponents.dwHostNameLength = static_cast<DWORD>(hostName.size() - 1);
-                urlComponents.lpszUrlPath = urlPath.data();
-                urlComponents.dwUrlPathLength = static_cast<DWORD>(urlPath.size() - 1);
-
-                if (!api->WinINet.InternetCrackUrlA(url.c_str(), 0, 0, &urlComponents)) {
-                    const auto e = GetLastError();
-                    auto es = strings::Format(
-                        "[X] InternetCrackUrlA error [0x%lx][%s]" CPL_FILE_AND_LINE, e,
-                        sys::FormatError(e).data()
+                INT32 retCode = ERROR_SUCCESS;
+                const auto &api = api::GetInstance();
+                HINTERNET hInternetOpen = nullptr, hInternetConnect = nullptr, hHttpOpenRequest = nullptr; {
+                    hInternetOpen = api->INet.InternetOpenA(
+                        "",
+                        INTERNET_OPEN_TYPE_DIRECT,
+                        nullptr,
+                        nullptr,
+                        0
+                        //                INTERNET_FLAG_SECURE | INTERNET_FLAG_IGNORE_CERT_CN_INVALID | INTERNET_FLAG_IGNORE_CERT_DATE_INVALID
                     );
-                    if (!es) {
-                        return Err(es.error().Append(CPL_FILE_AND_LINE));
+                    if (nullptr == hInternetOpen) {
+                        const DWORD e = GetLastError();
+                        retCode = static_cast<INT32>(e);
+                        log_error("[x] InternetOpen failed: [%lu] %s", e, FormatError(e).data());
+                        goto __ERROR__;
                     }
-                    return MakeErr(Errors::InternetCrackUrlA, es.value<>());
-                }
-
-                hSession = api->WinINet.InternetOpenA("IFW-CLIENT", INTERNET_OPEN_TYPE_PRECONFIG, nullptr, nullptr, 0);
-                if (nullptr == hSession) {
-                    const auto e = GetLastError();
-                    auto es = strings::Format(
-                        "[X] InternetOpenA error [0x%lx][%s]" CPL_FILE_AND_LINE, e,
-                        sys::FormatError(e).data()
+                } {
+                    hInternetConnect = api->INet.InternetConnectA(
+                        hInternetOpen,
+                        host.data(),
+                        port,
+                        "",
+                        "",
+                        INTERNET_SERVICE_HTTP,
+                        0,
+                        0
                     );
-                    if (!es) {
-                        return Err(es.error().Append(CPL_FILE_AND_LINE));
+                    if (nullptr == hInternetConnect) {
+                        const DWORD e = GetLastError();
+                        retCode = static_cast<INT32>(e);
+                        log_error("[x] InternetConnect failed: [%lu] %s", e, FormatError(e).data());
+                        goto __ERROR__;
                     }
-                    return MakeErr(Errors::InternetOpenA, es.value<>());
-                }
-
-                hConnect = api->WinINet.InternetConnectA(
-                    hSession,
-                    urlComponents.lpszHostName,
-                    urlComponents.nPort,
-                    "",
-                    "",
-                    INTERNET_SERVICE_HTTP,
-                    0,
-                    0
-                );
-                if (nullptr == hConnect) {
-                    const auto e = GetLastError();
-                    auto es = strings::Format(
-                        "[X] InternetConnectA error [0x%lx][%s]" CPL_FILE_AND_LINE, e,
-                        sys::FormatError(e).data()
+                } {
+                    const DWORD flag = https
+                                           ? INTERNET_FLAG_SECURE | INTERNET_FLAG_IGNORE_CERT_CN_INVALID |
+                                             INTERNET_FLAG_IGNORE_CERT_DATE_INVALID
+                                           : 0;
+                    hHttpOpenRequest = api->INet.HttpOpenRequestA(
+                        hInternetConnect,
+                        httpMethod.data(),
+                        httpRequestURL.data(),
+                        "HTTP/1.1",
+                        httpReferer.data(),
+                        nullptr,
+                        flag,
+                        0
                     );
-                    if (!es) {
-                        return Err(es.error().Append(CPL_FILE_AND_LINE));
+                    if (nullptr == hHttpOpenRequest) {
+                        const DWORD e = GetLastError();
+                        retCode = static_cast<INT32>(e);
+                        log_error("[x] HttpOpenRequest failed: [%lu] %s", e, FormatError(e).data());
+                        goto __ERROR__;
                     }
-                    return MakeErr(Errors::InternetConnectA, es.value<>());
-                }
-
-                hRequest = api->WinINet.HttpOpenRequestA(
-                    hConnect,
-                    "POST",
-                    urlComponents.lpszUrlPath,
-                    "HTTP/1.1",
-                    nullptr,
-                    nullptr,
-                    INTERNET_FLAG_DONT_CACHE,
-                    0
-                );
-                if (nullptr == hRequest) {
-                    const auto e = GetLastError();
-                    auto es = strings::Format(
-                        "[X] HttpOpenRequestA error [0x%lx][%s]" CPL_FILE_AND_LINE, e,
-                        sys::FormatError(e).data()
+                } {
+                    /**
+                     * 此处使用https发送的话，在WIN XP下会遇到12029的错误，需要勾选IE配置中支持TLS1.2的选项。
+                     * 因此暂时不考虑使用https了。
+                    */
+                    LPVOID p = nullptr;
+                    const auto pd = data.data();
+                    memmove(&p, &pd, sizeof(LPVOID));
+                    const BOOL bRet = api->INet.HttpSendRequestA(
+                        hHttpOpenRequest,
+                        nullptr,
+                        -1,
+                        p,
+                        data.length()
                     );
-                    if (!es) {
-                        return Err(es.error().Append(CPL_FILE_AND_LINE));
+                    if (!bRet) {
+                        const DWORD e = GetLastError();
+                        retCode = static_cast<INT32>(e);
+                        log_error("[x] HttpSendRequest failed: [%lu] %s", e, FormatError(e).data());
+                        goto __ERROR__;
                     }
-                    return MakeErr(Errors::HttpOpenRequestA, es.value<>());
+                } {
+                    BYTE buffer[BUFSIZ];
+                    out.clear();
+                    while (true) {
+                        DWORD dwBytesRead = BUFSIZ;
+                        bzero(buffer, sizeof(buffer));
+
+                        const auto bRead = api->INet.InternetReadFile(
+                            hHttpOpenRequest,
+                            buffer,
+                            BUFSIZ - 1,
+                            &dwBytesRead);
+
+                        if (dwBytesRead == 0) { break; }
+
+                        if (!bRead) {
+                            const DWORD e = GetLastError();
+                            retCode = static_cast<INT32>(e);
+                            log_error("[x] InternetReadFile failed: [%lu] %s", e, FormatError(e).data());
+                            goto __ERROR__;
+                        } else {
+                            buffer[dwBytesRead] = 0;
+                            PCTSTR _$p = nullptr;
+                            memmove(&_$p, &buffer, sizeof(PCTSTR));
+                            out.append(_$p, dwBytesRead);
+                        }
+                    }
                 }
 
-                if (!api->WinINet.HttpSendRequestA(
-                    hRequest,
-                    headers,
-                    static_cast<DWORD>(strlen(headers)),
-                    static_cast<LPVOID>(data.data()),
-                    static_cast<DWORD>(data.size())
-                )) {
-                    const auto e = GetLastError();
-                    auto es = strings::Format(
-                        "[X] HttpSendRequestA error [0x%lx][%s]" CPL_FILE_AND_LINE, e,
-                        sys::FormatError(e).data()
-                    );
-                    if (!es) {
-                        return Err(es.error().Append(CPL_FILE_AND_LINE));
-                    }
-                    return MakeErr(Errors::HttpSendRequestA, es.value<>());
+                goto __FREE__;
+            __ERROR__:
+                PASS;
+            __FREE__:
+                if (nullptr != hHttpOpenRequest) {
+                    api->INet.InternetCloseHandle(hHttpOpenRequest);
+                    hHttpOpenRequest = nullptr;
                 }
-
-                char buffer[1024]{};
-                DWORD dwBytesRead{};
-                while (true) {
-                    const auto r00 = api->WinINet.InternetReadFile(hRequest, buffer, sizeof(buffer), &dwBytesRead);
-                    if (!r00 || dwBytesRead <= 0) {
-                        break;
-                    }
-                    out.insert(out.end(), buffer, buffer + dwBytesRead);
+                if (nullptr != hInternetConnect) {
+                    api->INet.InternetCloseHandle(hInternetConnect);
+                    hInternetConnect = nullptr;
                 }
-                return out;
+                if (nullptr != hInternetOpen) {
+                    api->INet.InternetCloseHandle(hInternetOpen);
+                    hInternetOpen = nullptr;
+                }
+                return retCode;
             }
 
-            inline Int32Result UDPSend(
-                _In_ const std::string &host,
+            inline INT32 SendUDP(
+                // _Out_ string& out,
+                _In_ const string &host,
                 _In_ const uint16_t port,
-                _In_ const Stream &data,
-                _In_ const bool initWSAData = true
+                _In_ const string &data,
+                _In_ const bool initWSAData = false
             ) {
-                const auto *api = &cpl::sys::api::API::Instance();
-                if (!api
-                    || !api->Ws2_32.WSAStartup
-                    || !api->Ws2_32.WSAGetLastError
-                    || !api->Ws2_32.socket
-                    || !api->Ws2_32.htons
-                    || !api->Ws2_32.inet_addr
-                    || !api->Ws2_32.sendto
-                    || !api->Ws2_32.closesocket
-                    || !api->Ws2_32.WSACleanup) {
-                    return Err(cpl::Error(Errors::APIUnavailable, "api->Ws2_32.*" CPL_FILE_AND_LINE));
-                }
+                INT32 retCode = ERROR_SUCCESS;
 
-                const auto *pData = reinterpret_cast<const char *>(data.data());
-                const auto len = static_cast<int>(data.size());
-                auto sendSocket = INVALID_SOCKET;
+                const auto &p_data = data.data();
+                const auto len = static_cast<int>(data.length());
+
+                const auto &api = api::GetInstance();
+
+                // int iRet;
+
+                SOCKADDR *psa = nullptr;
+
+                auto SendSocket = INVALID_SOCKET;
                 sockaddr_in rcvAddr{};
 
-                const auto defer = base::MakeDefer([&]() {
-                    if (INVALID_SOCKET != sendSocket) {
-                        const auto r = api->Ws2_32.closesocket(sendSocket);
-                        (void) r;
-                    }
-                    if (initWSAData) {
-                        api->Ws2_32.WSACleanup();
-                    }
-                });
+                // char SendBuf[2] = "H";
+                // int BufLen = 2;
 
+                //----------------------
+                // Initialize Winsock
                 if (initWSAData) {
                     WSADATA wsaData{};
-                    const auto r00 = api->Ws2_32.WSAStartup(MAKEWORD(2, 2), &wsaData);
+                    const auto r00 = api->WS32.WSAStartup(MAKEWORD(2, 2), &wsaData);
                     if (r00 != ERROR_SUCCESS) {
-                        const auto e = api->Ws2_32.WSAGetLastError();
-
-                        auto es = strings::Format(
-                            "[X] WSAStartup failed [0x%lx][%s]" CPL_FILE_AND_LINE, e,
-                            sys::FormatError(e).data()
-                        );
-                        if (!es) {
-                            return Err(es.error().Append(CPL_FILE_AND_LINE));
-                        }
-                        return MakeErr(Errors::WSAStartup, es.value<>());
+                        const auto e = api->WS32.WSAGetLastError();
+                        retCode = e;
+                        log_error("[x] WSAStartup failed %d: %s", e, FormatError(e).data());
+                        goto __ERROR__;
                     }
                 }
 
-                sendSocket = api->Ws2_32.socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-                if (sendSocket == INVALID_SOCKET) {
-                    const auto e = api->Ws2_32.WSAGetLastError();
-                    auto es = strings::Format(
-                        "[X] socket error [0x%lx][%s]" CPL_FILE_AND_LINE, e,
-                        sys::FormatError(e).data()
-                    );
-                    if (!es) {
-                        return Err(es.error().Append(CPL_FILE_AND_LINE));
-                    }
-                    return MakeErr(Errors::WSASocket_, es.value<>());
+                //---------------------------------------------
+                // Create a socket for sending data
+                SendSocket = api->WS32.socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+                if (SendSocket == INVALID_SOCKET) {
+                    const int e = api->WS32.WSAGetLastError();
+                    retCode = e;
+                    log_error("[x] socket failed %d: %s", e, FormatError(e).data());
+                    goto __ERROR__;
                 }
-
+                //---------------------------------------------
+                // Set up the RecvAddr structure with the IP address of
+                // the receiver (in this example case "192.168.1.1")
+                // and the specified port number.
                 rcvAddr.sin_family = AF_INET;
-                rcvAddr.sin_port = api->Ws2_32.htons(port);
-                rcvAddr.sin_addr.s_addr = api->Ws2_32.inet_addr(host.data());
+                rcvAddr.sin_port = api->WS32.htons(port);
+                rcvAddr.sin_addr.s_addr = api->WS32.inet_addr(host.data());
 
-                const auto r00 = api->Ws2_32.sendto(
-                    sendSocket,
-                    pData,
-                    len,
-                    0,
-                    reinterpret_cast<SOCKADDR *>(&rcvAddr),
-                    sizeof(rcvAddr)
-                );
-                if (r00 == SOCKET_ERROR) {
-                    const auto e = api->Ws2_32.WSAGetLastError();
-                    auto es = strings::Format(
-                        "[X] sendto error [0x%lx][%s]" CPL_FILE_AND_LINE, e,
-                        sys::FormatError(e).data()
-                    );
-                    if (!es) {
-                        return Err(es.error().Append(CPL_FILE_AND_LINE));
+
+                psa = reinterpret_cast<SOCKADDR *>(&rcvAddr); {
+                    const auto r00 = api->WS32.sendto(SendSocket,
+                                                      p_data,
+                                                      len,
+                                                      0,
+                                                      psa,
+                                                      sizeof(rcvAddr));
+
+                    if (r00 == SOCKET_ERROR) {
+                        const int e = api->WS32.WSAGetLastError();
+                        retCode = e;
+                        log_error("[x] sendto failed %d: %s", e, FormatError(e).data());
+                        goto __ERROR__;
                     }
-                    return MakeErr(Errors::WSASendTo, es.value<>());
                 }
-                return ERROR_SUCCESS;
+
+                goto __FREE__;
+            __ERROR__:
+                PASS;
+            __FREE__:
+                if (INVALID_SOCKET != SendSocket) {
+                    const auto r00 = api->WS32.closesocket(SendSocket);
+                    if (r00 == SOCKET_ERROR) {
+                        const int e = api->WS32.WSAGetLastError();
+                        retCode = e;
+                        log_error("[x] closesocket failed %d: %s", e, FormatError(e).data());
+                    }
+                }
+                if (initWSAData) {
+                    api->WS32.WSACleanup();
+                }
+                return retCode;
             }
 
             namespace wrapper {
-                inline Int32Result UDPSend(
-                    const std::string &host,
+                inline INT32 SendTo(
+                    const string &host,
                     const UINT16 port,
-                    const Stream &data,
-                    cpl::crypto::stl::ISync *cryptoProvider = nullptr,
-                    const char *debugLabel = "udp"
+                    const string &data,
+                    const string &secret
                 ) {
-                    Stream buffer{};
-                    if (!cryptoProvider) {
-                        buffer = data;
-                    } else {
-                        const auto enc = cryptoProvider->Encrypt(data);
-                        if (!enc) {
-                            return Err(enc.error());
-                        }
-                        buffer = enc.value();
-                        if (cpl::gDebug && *cpl::gDebug) {
-                            const auto plainHex = cpl::codec::Hex::Hexlify(data);
-                            const auto cipherB64 = cpl::codec::Base64::UrlSafeBase64Encode(buffer);
-                            if (!plainHex || !cipherB64) {
-                                LOG_D(
-                                    "[X] Failed to serialize UDP debug payload: plain_ok=%d, cipher_ok=%d%s",
-                                    plainHex.has_value() ? 1 : 0,
-                                    cipherB64.has_value() ? 1 : 0,
-                                    CPL_FILE_AND_LINE
-                                );
-                            } else {
-                                LOG_D(
-                                    "[?] UDP encrypted payload [%s]: plain_hex=%s cipher_urlsafe_base64=%s",
-                                    debugLabel ? debugLabel : "udp",
-                                    plainHex.value<>().data(),
-                                    cipherB64.value<>().data()
-                                );
-                            }
-                        }
-                    }
-                    return network::UDPSend(host, port, buffer);
+                    INT32 retCode = ERROR_SUCCESS;
+                    string enc{};
+                    retCode |= crypto::Win32Crypto.Encrypt(
+                        secret,
+                        data,
+                        enc
+                    );
+                    retCode |= SendUDP(
+                        host,
+                        port,
+                        enc
+                    );
+                    return retCode;
                 }
 
-                inline Result<Stream> HTTPPost(
-                    _In_ const std::string &url,
-                    const Stream &data,
-                    cpl::crypto::stl::ISync *cryptoProvider = nullptr
+                inline INT32 SendTo(
+                    const string &host,
+                    const UINT16 port,
+                    const string &secret,
+                    const BYTE status,
+                    const string &mac
                 ) {
-                    Stream buffer{};
-                    if (!cryptoProvider) {
-                        buffer = data;
-                    } else {
-                        const auto enc = cryptoProvider->Encrypt(data);
-                        if (!enc) {
-                            return Err(enc.error());
-                        }
-                        buffer = enc.value();
-                    }
+                    // 通信格式：timestamp, status, mac
 
-                    const auto b64 = cpl::codec::Base64::UrlSafeBase64Encode(buffer);
-                    if (!b64) {
-                        return Err(b64.error());
+                    INT32 retCode = ERROR_SUCCESS;
+                    string data{};
+                    const auto timestamp = time(nullptr);
+                    const DWORD dwTimestamp = timestamp;
+                    const auto p0 = &dwTimestamp;
+                    char *p{};
+                    memmove(&p, &p0, sizeof(PVOID));
+                    for (auto i = 0; i < sizeof(time_t); i++) {
+                        data.push_back(p[i]);
                     }
-                    auto request = Stream(b64.value().begin(), b64.value().end());
-                    return network::HTTPPost(url, request);
+                    data.push_back(static_cast<char>(status));
+                    data += mac;
+                    string enc{};
+                    retCode |= crypto::Win32Crypto.Encrypt(
+                        secret,
+                        data,
+                        enc
+                    );
+                    retCode |= network::SendUDP(
+                        host,
+                        port,
+                        enc
+                    );
+                    return retCode;
+                }
+
+                inline INT32 Post(
+                    const string &host,
+                    const UINT16 port,
+                    const string &secret,
+                    const string &data
+                ) {
+                    INT32 retCode = ERROR_SUCCESS;
+                    string enc{};
+                    retCode |= crypto::Win32Crypto.Encrypt(
+                        secret,
+                        data,
+                        enc
+                    );
+                    string b64enc{};
+                    b64enc.reserve(enc.size() * 2 + 16);
+                    bzero(&b64enc[0], enc.size() * 2 + 16);
+                    auto *pc = b64enc.data() + 2;
+                    char *p{};
+                    memmove(&p, &pc, sizeof(PVOID));
+                    Codec$$$UrlSafeBase64Encode(enc.data(), enc.length(), p);
+                    while (!*p) {
+                        b64enc.push_back(*p);
+                        p++;
+                    }
+                    string response{};
+                    retCode |= network::SendHTTP(
+                        response,
+                        host,
+                        port,
+                        "POST",
+                        "/",
+                        "https://www.sgcc.com.cn/",
+                        b64enc,
+                        false
+                    );
+                    log_info("[%d] POST response: %s", retCode, response.data());
+                    return retCode;
                 }
             }
         }
     }
 }
+<<<<<<< HEAD
+=======
+
+#endif //CPL_NETWORK_HPP_FLICKER_MIGHTY_BLOSSOM_GLIDE_RHYTHM_PULSE_TURBULENCE_ECHO
+>>>>>>> dev-merge
