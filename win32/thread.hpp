@@ -32,16 +32,12 @@ namespace cpl {
                     }
                 }
 
-<<<<<<< HEAD
-                Int32Result Start() {
-=======
                 /**
                  * 使用CreateThread启动线程，可能会导致内存泄漏。
                  * 适用场景：一次性启动，无限循环的任务。
                  * 是否会引入InitializeCriticalSectionEx，未知。
                  */
                 void Start() {
->>>>>>> dev-merge
                     this->threadHandle = CreateThread(
                         nullptr,
                         0,
@@ -52,22 +48,6 @@ namespace cpl {
                     );
                     if (nullptr == this->threadHandle) {
                         const auto e = GetLastError();
-<<<<<<< HEAD
-                        auto es = strings::Format(
-                            "[X] CreateThread failed [0x%lx][%s]" CPL_FILE_AND_LINE,
-                            e,
-                            FormatError(e).data()
-                        );
-                        if (!es) {
-                            return Err(es.error().Append(CPL_FILE_AND_LINE));
-                        }
-                        return MakeErr(Errors::CreateThread_, es.value<>());
-                    }
-                    return 0;
-                }
-
-                Int32Result StartEx() {
-=======
                         log_fatal("[x] CreateThread failed 0x%lx:%s", e, FormatError(e).data());
                         exit(static_cast<int>(e));
                     }
@@ -78,7 +58,6 @@ namespace cpl {
                  * 适用场景，需要频繁启动、关闭线程。
                  */
                 void StartEx() {
->>>>>>> dev-merge
                     this->threadHandle = reinterpret_cast<HANDLE>(_beginthreadex(
                         nullptr,
                         0,
@@ -87,23 +66,6 @@ namespace cpl {
                         0,
                         reinterpret_cast<unsigned *>(&this->threadId)
                     ));
-<<<<<<< HEAD
-                    if (this->threadHandle == INVALID_HANDLE_VALUE || this->threadHandle == nullptr) {
-                        const auto e = GetLastError();
-                        auto es = strings::Format(
-                            "[X] _beginthreadex failed [errno=%d][dos=%lu][%s]" CPL_FILE_AND_LINE,
-                            errno,
-                            _doserrno,
-                            FormatError(e).data()
-                        );
-
-                        if (!es) {
-                            return Err(es.error().Append(CPL_FILE_AND_LINE));
-                        }
-                        return MakeErr(Errors::BeginThreadEx, es.value<>());
-                    }
-                    return 0;
-=======
                     if (this->threadHandle == INVALID_HANDLE_VALUE) {
                         if (EAGAIN == errno) {
                             log_fatal("[x] _beginthreadex failed: too many threads: %d", _doserrno);
@@ -122,7 +84,6 @@ namespace cpl {
                         log_fatal("[x] _beginthreadex failed: unknown error: %d %d", errno, _doserrno);
                         exit(errno);
                     }
->>>>>>> dev-merge
                 }
 
                 DWORD GetThreadId() const {
@@ -137,8 +98,4 @@ namespace cpl {
     }
 }
 
-<<<<<<< HEAD
-#endif // THREAD_HPP_APPLE_TREE_FLOWER_BIRD_CLOUD_RIVER_STONE_MUSIC
-=======
 #endif //THREAD_HPP_APPLE_TREE_FLOWER_BIRD_CLOUD_RIVER_STONE_MUSIC
->>>>>>> dev-merge

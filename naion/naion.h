@@ -140,8 +140,6 @@ int naion_stream_xchacha20_xor_ic(unsigned char *c, const unsigned char *m,
                                    const unsigned char *n, uint64_t ic,
                                    const unsigned char *k);
 
-<<<<<<< HEAD
-=======
 #endif /* NAION_LAYER_SYMM */
 
 /* ========================================================================= */
@@ -149,7 +147,6 @@ int naion_stream_xchacha20_xor_ic(unsigned char *c, const unsigned char *m,
 /* ========================================================================= */
 #if NAION_LAYER_AEAD
 
->>>>>>> dev-merge
 /* ------------------------------------------------------------------------- */
 /* XChaCha20-Poly1305 (IETF) */
 /* ------------------------------------------------------------------------- */
@@ -229,10 +226,7 @@ int naion_secretbox_xchacha20poly1305_open_detached(unsigned char *m,
 /* ------------------------------------------------------------------------- */
 /* secretbox (XSalsa20-Poly1305 compatible names) */
 /* ------------------------------------------------------------------------- */
-<<<<<<< HEAD
-=======
 #if NAION_XSALSA20
->>>>>>> dev-merge
 #define naion_secretbox_xsalsa20poly1305_KEYBYTES naion_secretbox_xchacha20poly1305_KEYBYTES
 #define naion_secretbox_xsalsa20poly1305_NONCEBYTES naion_secretbox_xchacha20poly1305_NONCEBYTES
 #define naion_secretbox_xsalsa20poly1305_MACBYTES naion_secretbox_xchacha20poly1305_MACBYTES
@@ -262,8 +256,6 @@ int naion_secretbox_xsalsa20poly1305_open_detached(unsigned char *m,
                                                     unsigned long long clen,
                                                     const unsigned char *n,
                                                     const unsigned char *k);
-<<<<<<< HEAD
-=======
 #endif /* NAION_XSALSA20 */
 
 /* ------------------------------------------------------------------------- */
@@ -293,7 +285,6 @@ int naion_box_curve25519xchacha20poly1305_open_easy_afternm(
 /* Layer 3 — NAION_LAYER_CSM (X25519/KX/Box + Ed25519 + CSM)                */
 /* ========================================================================= */
 #if NAION_LAYER_CSM
->>>>>>> dev-merge
 
 /* ------------------------------------------------------------------------- */
 /* X25519 key exchange + box */
@@ -332,12 +323,6 @@ int naion_kx_server_session_keys(unsigned char *rx, unsigned char *tx,
 #define naion_box_curve25519xchacha20poly1305_SEEDBYTES 32U
 #define naion_box_curve25519xchacha20poly1305_PUBLICKEYBYTES 32U
 #define naion_box_curve25519xchacha20poly1305_SECRETKEYBYTES 32U
-<<<<<<< HEAD
-#define naion_box_curve25519xchacha20poly1305_BEFORENMBYTES 32U
-#define naion_box_curve25519xchacha20poly1305_NONCEBYTES 24U
-#define naion_box_curve25519xchacha20poly1305_MACBYTES 16U
-=======
->>>>>>> dev-merge
 #define naion_box_curve25519xchacha20poly1305_SEALBYTES \
     (naion_box_curve25519xchacha20poly1305_PUBLICKEYBYTES + \
      naion_box_curve25519xchacha20poly1305_MACBYTES)
@@ -363,17 +348,6 @@ int naion_box_curve25519xchacha20poly1305_open_easy(
     unsigned char *m, const unsigned char *c, unsigned long long clen,
     const unsigned char *n, const unsigned char *pk, const unsigned char *sk);
 
-<<<<<<< HEAD
-int naion_box_curve25519xchacha20poly1305_easy_afternm(
-    unsigned char *c, const unsigned char *m, unsigned long long mlen,
-    const unsigned char *n, const unsigned char *k);
-
-int naion_box_curve25519xchacha20poly1305_open_easy_afternm(
-    unsigned char *m, const unsigned char *c, unsigned long long clen,
-    const unsigned char *n, const unsigned char *k);
-
-=======
->>>>>>> dev-merge
 int naion_box_curve25519xchacha20poly1305_seal(unsigned char *c,
                                                  const unsigned char *m,
                                                  unsigned long long mlen,
@@ -386,10 +360,7 @@ int naion_box_curve25519xchacha20poly1305_seal_open(
 /* ------------------------------------------------------------------------- */
 /* X25519 box (XSalsa20-Poly1305 compatible names) */
 /* ------------------------------------------------------------------------- */
-<<<<<<< HEAD
-=======
 #if NAION_XSALSA20
->>>>>>> dev-merge
 #define naion_box_curve25519xsalsa20poly1305_SEEDBYTES naion_box_curve25519xchacha20poly1305_SEEDBYTES
 #define naion_box_curve25519xsalsa20poly1305_PUBLICKEYBYTES naion_box_curve25519xchacha20poly1305_PUBLICKEYBYTES
 #define naion_box_curve25519xsalsa20poly1305_SECRETKEYBYTES naion_box_curve25519xchacha20poly1305_SECRETKEYBYTES
@@ -435,11 +406,6 @@ int naion_box_curve25519xsalsa20poly1305_seal(unsigned char *c,
 int naion_box_curve25519xsalsa20poly1305_seal_open(
     unsigned char *m, const unsigned char *c, unsigned long long clen,
     const unsigned char *pk, const unsigned char *sk);
-<<<<<<< HEAD
-
-/* runtime selector for default naion_box_* family */
-extern int gUseXChaCha20; /* 1: xchacha20poly1305, 0: xsalsa20poly1305 */
-=======
 #endif /* NAION_XSALSA20 */
 
 /* runtime selector for default naion_box_* family.
@@ -448,7 +414,6 @@ extern int gUseXChaCha20; /* 1: xchacha20poly1305, 0: xsalsa20poly1305 */
 #if NAION_XSALSA20
 extern int gUseXChaCha20; /* 1: xchacha20poly1305, 0: xsalsa20poly1305 */
 #endif
->>>>>>> dev-merge
 void naion_box_set_use_xchacha20(int use_xchacha20);
 int naion_box_get_use_xchacha20(void);
 /* alias getter/setter for direct global-style naming */
@@ -542,8 +507,6 @@ int naion_sign_ed25519_pk_to_curve25519(unsigned char *curve25519_pk,
 int naion_sign_ed25519_sk_to_curve25519(unsigned char *curve25519_sk,
                                          const unsigned char *ed25519_sk);
 
-<<<<<<< HEAD
-=======
 /* ------------------------------------------------------------------------- */
 /* CSM — client/server secure messaging (client holds server public key)     */
 /* Identical packet layout to the former csm.h. See PROTOCOL.md.             */
@@ -845,7 +808,6 @@ int naion_csm_sess_server_decrypt(
 
 #endif /* NAION_LAYER_CSM_SESSION */
 
->>>>>>> dev-merge
 /*
  * Optional compatibility aliases.
  * Keep disabled by default to avoid symbol/name collisions with libsodium.
@@ -896,9 +858,6 @@ int naion_csm_sess_server_decrypt(
 #define SIMPLE_SODIUM_ERR (-1)
 
 static naion_random_provider_fn g_random_provider = NULL;
-<<<<<<< HEAD
-int gUseXChaCha20 = 0;
-=======
 #if NAION_XSALSA20
 /* Default to XChaCha20-Poly1305 (24-byte nonce).
  * Explicitly-named naion_*_xchacha20poly1305_* functions unconditionally use
@@ -906,7 +865,6 @@ int gUseXChaCha20 = 0;
  * naion_box_* dispatch family. Defaults to 1 to keep 24-byte nonce semantics. */
 int gUseXChaCha20 = 1;
 #endif
->>>>>>> dev-merge
 
 static int naion_system_randombytes(unsigned char *buf, size_t size);
 static void naion_system_random_provider(void * const buf, const size_t size);
@@ -1580,11 +1538,7 @@ ed25519_sc_is_canonical(const unsigned char s[32])
 /* ------------------------------------------------------------------------- */
 
 typedef int64_t _naion_i64;
-<<<<<<< HEAD
-typedef _naion_i64 _naion_gf[16];
-=======
 typedef int32_t _naion_gf[16];
->>>>>>> dev-merge
 
 static void
 _naion_x25519_set(_naion_gf dst, const _naion_gf src)
@@ -1622,13 +1576,8 @@ _naion_x25519_carry(_naion_gf o)
     for (i = 0; i < 16; i++) {
         o[i] += (_naion_i64) 1 << 16;
         c = o[i] >> 16;
-<<<<<<< HEAD
-        o[(i + 1) * (i < 15)] += c - 1 + 37 * (c - 1) * (i == 15);
-        o[i] -= c << 16;
-=======
         o[(i + 1) * (i < 15)] += (int32_t) (c - 1 + 37 * (c - 1) * (i == 15));
         o[i] -= (int32_t) (c << 16);
->>>>>>> dev-merge
     }
 }
 
@@ -1692,9 +1641,6 @@ _naion_x25519_unpack(_naion_gf o, const uint8_t n[32])
 static void
 _naion_x25519_mul(_naion_gf o, const _naion_gf a, const _naion_gf b)
 {
-<<<<<<< HEAD
-    _naion_i64 t[31];
-=======
     /*
      * Field elements live in 32-bit limbs (see _naion_gf typedef).  The
      * convolution below accumulates into 64-bit temporaries so the products
@@ -1709,30 +1655,18 @@ _naion_x25519_mul(_naion_gf o, const _naion_gf a, const _naion_gf b)
      */
     _naion_i64 t[31];
     _naion_i64 c;
->>>>>>> dev-merge
     int        i;
     int        j;
 
     memset(t, 0, sizeof t);
     for (i = 0; i < 16; i++) {
         for (j = 0; j < 16; j++) {
-<<<<<<< HEAD
-            t[i + j] += a[i] * b[j];
-=======
             t[i + j] += (_naion_i64) a[i] * (_naion_i64) b[j];
->>>>>>> dev-merge
         }
     }
     for (i = 0; i < 15; i++) {
         t[i] += 38 * t[i + 16];
     }
-<<<<<<< HEAD
-    for (i = 0; i < 16; i++) {
-        o[i] = t[i];
-    }
-    _naion_x25519_carry(o);
-    _naion_x25519_carry(o);
-=======
     /*
      * Reduce the 16-limb result in place (on the 64-bit buffer) so every limb
      * fits comfortably inside int32 before it is stored.  Three passes match
@@ -1750,7 +1684,6 @@ _naion_x25519_mul(_naion_gf o, const _naion_gf a, const _naion_gf b)
     for (i = 0; i < 16; i++) {
         o[i] = (int32_t) t[i];
     }
->>>>>>> dev-merge
 }
 
 static void
@@ -2425,13 +2358,10 @@ rotl32(uint32_t x, int b)
     return (x << b) | (x >> (32 - b));
 }
 
-<<<<<<< HEAD
-=======
 #if NAION_XSALSA20
 /* ------------------------------------------------------------------ */
 /* Salsa20 / HSalsa20 / XSalsa20 (only built when NAION_XSALSA20=1)   */
 /* ------------------------------------------------------------------ */
->>>>>>> dev-merge
 static void
 salsa20_quarterround(uint32_t *a, uint32_t *b, uint32_t *c, uint32_t *d)
 {
@@ -2595,10 +2525,7 @@ xsalsa20_xor_ic(uint8_t *c, const uint8_t *m, uint64_t mlen,
     naion_memzero(block, sizeof block);
     return SIMPLE_SODIUM_OK;
 }
-<<<<<<< HEAD
-=======
 #endif /* NAION_XSALSA20 */
->>>>>>> dev-merge
 
 static void
 chacha20_quarterround(uint32_t *a, uint32_t *b, uint32_t *c, uint32_t *d)
@@ -3369,10 +3296,7 @@ naion_init(void)
     return SIMPLE_SODIUM_OK;
 }
 
-<<<<<<< HEAD
-=======
 #if NAION_LAYER_SYMM
->>>>>>> dev-merge
 void
 naion_set_random_provider(naion_random_provider_fn provider)
 {
@@ -3500,8 +3424,6 @@ naion_stream_xchacha20_xor_ic(unsigned char *c, const unsigned char *m,
     return xchacha20_xor_ic(c, m, (uint64_t) mlen, n, ic, k);
 }
 
-<<<<<<< HEAD
-=======
 #endif /* NAION_LAYER_SYMM */
 
 /* ========================================================================= */
@@ -3509,7 +3431,6 @@ naion_stream_xchacha20_xor_ic(unsigned char *c, const unsigned char *m,
 /* ========================================================================= */
 #if NAION_LAYER_AEAD
 
->>>>>>> dev-merge
 /*
  * Combined AEAD layout matches libsodium: ciphertext || mac.
  * This intentionally differs from naion_box_*_easy()/secretbox_easy(),
@@ -3764,8 +3685,6 @@ naion_secretbox_xchacha20poly1305_open_detached(unsigned char *m,
     return ret;
 }
 
-<<<<<<< HEAD
-=======
 /* Box symmetric core: pure XChaCha20-Poly1305 (no Curve25519). Lives at the
  * AEAD layer because secretbox delegates to it; the asymmetric box wrappers
  * (beforenm/easy/seal) that add X25519 key agreement live at Layer 3. */
@@ -3925,7 +3844,6 @@ naion_box_curve25519xchacha20poly1305_open_easy_afternm(
 }
 
 #if NAION_XSALSA20
->>>>>>> dev-merge
 int
 naion_secretbox_xsalsa20poly1305_easy(unsigned char *c,
                                       const unsigned char *m,
@@ -4017,8 +3935,6 @@ naion_secretbox_xsalsa20poly1305_open_detached(unsigned char *m,
     free(combined);
     return ret;
 }
-<<<<<<< HEAD
-=======
 #endif /* NAION_XSALSA20 */
 
 #endif /* NAION_LAYER_AEAD */
@@ -4027,7 +3943,6 @@ naion_secretbox_xsalsa20poly1305_open_detached(unsigned char *m,
 /* Layer 3 implementations — X25519/KX + asymmetric box + Ed25519 + CSM    */
 /* ========================================================================= */
 #if NAION_LAYER_CSM
->>>>>>> dev-merge
 
 int
 naion_scalarmult_curve25519(unsigned char *q,
@@ -4311,164 +4226,6 @@ naion_box_curve25519xchacha20poly1305_open_easy(
 }
 
 int
-<<<<<<< HEAD
-naion_box_curve25519xchacha20poly1305_easy_afternm(
-    unsigned char *c, const unsigned char *m, unsigned long long mlen,
-    const unsigned char *n, const unsigned char *k)
-{
-    if (c == NULL || n == NULL || k == NULL || (m == NULL && mlen > 0ULL)) {
-        return SIMPLE_SODIUM_ERR;
-    }
-#if defined(DEBUG) && DEBUG
-    naion_debug_dump_hex("box.easy_afternm.nonce", n, 24U);
-    naion_debug_dump_hex("box.easy_afternm.k_nm", k, 32U);
-    if (m != NULL) {
-        naion_debug_dump_hex("box.easy_afternm.msg", m, (size_t) mlen);
-    }
-#endif
-
-    {
-        uint8_t               block0[64];
-        _naion_poly1305_state st;
-        uint64_t              rem;
-        size_t                first_take;
-        int                   ret;
-
-        memset(block0, 0, sizeof block0);
-        first_take = (size_t) ((mlen < 32ULL) ? mlen : 32ULL);
-        if (first_take > 0U) {
-            memcpy(block0 + 32U, m, first_take);
-        }
-        ret = naion_stream_xchacha20_xor_ic(block0, block0,
-                                            (unsigned long long) (32U + first_take),
-                                            n, 0ULL, k);
-        if (ret != SIMPLE_SODIUM_OK) {
-            naion_memzero(block0, sizeof block0);
-            return SIMPLE_SODIUM_ERR;
-        }
-        poly1305_init(&st, block0);
-        if (first_take > 0U) {
-            memcpy(c + naion_box_curve25519xchacha20poly1305_MACBYTES,
-                   block0 + 32U, first_take);
-        }
-        rem = mlen - (uint64_t) first_take;
-        if (rem > 0ULL) {
-            ret = naion_stream_xchacha20_xor_ic(
-                c + naion_box_curve25519xchacha20poly1305_MACBYTES + first_take,
-                m + first_take,
-                rem,
-                n, 1ULL, k);
-            if (ret != SIMPLE_SODIUM_OK) {
-                naion_memzero(block0, sizeof block0);
-                naion_memzero(&st, sizeof st);
-                return SIMPLE_SODIUM_ERR;
-            }
-        }
-
-        poly1305_update(&st,
-                        c + naion_box_curve25519xchacha20poly1305_MACBYTES,
-                        (size_t) mlen);
-        poly1305_finish(&st, c);
-        ret = SIMPLE_SODIUM_OK;
-
-        naion_memzero(block0, sizeof block0);
-        naion_memzero(&st, sizeof st);
-#if defined(DEBUG) && DEBUG
-        if (ret == SIMPLE_SODIUM_OK) {
-            naion_debug_dump_hex("box.easy_afternm.mac", c, 16U);
-            naion_debug_dump_hex("box.easy_afternm.cipher",
-                                 c + naion_box_curve25519xchacha20poly1305_MACBYTES,
-                                 (size_t) mlen);
-        } else {
-            printf("[naion][dbg] box.easy_afternm ret=%d\n", ret);
-        }
-#endif
-        return ret;
-    }
-}
-
-int
-naion_box_curve25519xchacha20poly1305_open_easy_afternm(
-    unsigned char *m, const unsigned char *c, unsigned long long clen,
-    const unsigned char *n, const unsigned char *k)
-{
-    if (m == NULL || c == NULL || n == NULL || k == NULL ||
-        clen < naion_box_curve25519xchacha20poly1305_MACBYTES) {
-        return SIMPLE_SODIUM_ERR;
-    }
-#if defined(DEBUG) && DEBUG
-    naion_debug_dump_hex("box.open_easy_afternm.nonce", n, 24U);
-    naion_debug_dump_hex("box.open_easy_afternm.k_nm", k, 32U);
-    naion_debug_dump_hex("box.open_easy_afternm.mac", c, 16U);
-    naion_debug_dump_hex("box.open_easy_afternm.cipher",
-                         c + naion_box_curve25519xchacha20poly1305_MACBYTES,
-                         (size_t) (clen - naion_box_curve25519xchacha20poly1305_MACBYTES));
-#endif
-
-    {
-        uint8_t               block0[64];
-        uint8_t               computed_mac[16];
-        _naion_poly1305_state st;
-        const unsigned char  *cipher =
-            c + naion_box_curve25519xchacha20poly1305_MACBYTES;
-        const unsigned long long mlen =
-            clen - naion_box_curve25519xchacha20poly1305_MACBYTES;
-        size_t                first_take;
-        uint64_t              rem;
-        int                   ret;
-
-        memset(block0, 0, sizeof block0);
-        first_take = (size_t) ((mlen < 32ULL) ? mlen : 32ULL);
-        if (first_take > 0U) {
-            memcpy(block0 + 32U, cipher, first_take);
-        }
-        ret = naion_stream_xchacha20_xor_ic(block0, block0, sizeof block0, n, 0ULL, k);
-        if (ret != SIMPLE_SODIUM_OK) {
-            naion_memzero(block0, sizeof block0);
-            return SIMPLE_SODIUM_ERR;
-        }
-        poly1305_init(&st, block0);
-        poly1305_update(&st, cipher, (size_t) mlen);
-        poly1305_finish(&st, computed_mac);
-
-        if (verify16(c, computed_mac) != 1) {
-            naion_memzero(block0, sizeof block0);
-            naion_memzero(computed_mac, sizeof computed_mac);
-            naion_memzero(&st, sizeof st);
-            return SIMPLE_SODIUM_ERR;
-        }
-        if (first_take > 0U) {
-            memcpy(m, block0 + 32U, first_take);
-        }
-        rem = mlen - (uint64_t) first_take;
-        if (rem > 0ULL) {
-            ret = naion_stream_xchacha20_xor_ic(m + first_take, cipher + first_take, rem, n, 1ULL, k);
-        } else {
-            ret = SIMPLE_SODIUM_OK;
-        }
-        naion_memzero(block0, sizeof block0);
-        naion_memzero(computed_mac, sizeof computed_mac);
-        naion_memzero(&st, sizeof st);
-        if (ret != SIMPLE_SODIUM_OK) {
-            return SIMPLE_SODIUM_ERR;
-        }
-        ret = SIMPLE_SODIUM_OK;
-#if defined(DEBUG) && DEBUG
-        if (ret == SIMPLE_SODIUM_OK) {
-            naion_debug_dump_hex("box.open_easy_afternm.msg",
-                                 m,
-                                 (size_t) (clen - naion_box_curve25519xchacha20poly1305_MACBYTES));
-        } else {
-            printf("[naion][dbg] box.open_easy_afternm ret=%d\n", ret);
-        }
-#endif
-        return ret;
-    }
-}
-
-int
-=======
->>>>>>> dev-merge
 naion_box_curve25519xchacha20poly1305_seal(unsigned char *c,
                                              const unsigned char *m,
                                              unsigned long long mlen,
@@ -4559,10 +4316,7 @@ naion_box_curve25519xchacha20poly1305_seal_open(
     }
 }
 
-<<<<<<< HEAD
-=======
 #if NAION_XSALSA20
->>>>>>> dev-merge
 int
 naion_box_curve25519xsalsa20poly1305_keypair(unsigned char *pk,
                                               unsigned char *sk)
@@ -4839,13 +4593,6 @@ naion_box_curve25519xsalsa20poly1305_seal_open(
     naion_memzero(nonce, sizeof nonce);
     return ret;
 }
-<<<<<<< HEAD
-
-void
-naion_box_set_use_xchacha20(int use_xchacha20)
-{
-    gUseXChaCha20 = (use_xchacha20 != 0) ? 1 : 0;
-=======
 #endif /* NAION_XSALSA20 */
 
 /* ------------------------------------------------------------------ */
@@ -4860,21 +4607,16 @@ naion_box_set_use_xchacha20(int use_xchacha20)
     /* No-op: only XChaCha20 is available. */
     (void) use_xchacha20;
 #endif
->>>>>>> dev-merge
 }
 
 int
 naion_box_get_use_xchacha20(void)
 {
-<<<<<<< HEAD
-    return (gUseXChaCha20 != 0) ? 1 : 0;
-=======
 #if NAION_XSALSA20
     return (gUseXChaCha20 != 0) ? 1 : 0;
 #else
     return 1; /* XChaCha20 is always selected when XSalsa20 is absent. */
 #endif
->>>>>>> dev-merge
 }
 
 void
@@ -4892,252 +4634,147 @@ naion_get_use_xchacha20(void)
 size_t
 naion_box_seedbytes(void)
 {
-<<<<<<< HEAD
-    return (naion_box_get_use_xchacha20() != 0)
-               ? (size_t) naion_box_curve25519xchacha20poly1305_SEEDBYTES
-               : (size_t) naion_box_curve25519xsalsa20poly1305_SEEDBYTES;
-=======
     return (size_t) naion_box_curve25519xchacha20poly1305_SEEDBYTES;
->>>>>>> dev-merge
 }
 
 size_t
 naion_box_publickeybytes(void)
 {
-<<<<<<< HEAD
-    return (naion_box_get_use_xchacha20() != 0)
-               ? (size_t) naion_box_curve25519xchacha20poly1305_PUBLICKEYBYTES
-               : (size_t) naion_box_curve25519xsalsa20poly1305_PUBLICKEYBYTES;
-=======
     return (size_t) naion_box_curve25519xchacha20poly1305_PUBLICKEYBYTES;
->>>>>>> dev-merge
 }
 
 size_t
 naion_box_secretkeybytes(void)
 {
-<<<<<<< HEAD
-    return (naion_box_get_use_xchacha20() != 0)
-               ? (size_t) naion_box_curve25519xchacha20poly1305_SECRETKEYBYTES
-               : (size_t) naion_box_curve25519xsalsa20poly1305_SECRETKEYBYTES;
-=======
     return (size_t) naion_box_curve25519xchacha20poly1305_SECRETKEYBYTES;
->>>>>>> dev-merge
 }
 
 size_t
 naion_box_beforenmbytes(void)
 {
-<<<<<<< HEAD
-    return (naion_box_get_use_xchacha20() != 0)
-               ? (size_t) naion_box_curve25519xchacha20poly1305_BEFORENMBYTES
-               : (size_t) naion_box_curve25519xsalsa20poly1305_BEFORENMBYTES;
-=======
     return (size_t) naion_box_curve25519xchacha20poly1305_BEFORENMBYTES;
->>>>>>> dev-merge
 }
 
 size_t
 naion_box_noncebytes(void)
 {
-<<<<<<< HEAD
-    return (naion_box_get_use_xchacha20() != 0)
-               ? (size_t) naion_box_curve25519xchacha20poly1305_NONCEBYTES
-               : (size_t) naion_box_curve25519xsalsa20poly1305_NONCEBYTES;
-=======
     return (size_t) naion_box_curve25519xchacha20poly1305_NONCEBYTES;
->>>>>>> dev-merge
 }
 
 size_t
 naion_box_macbytes(void)
 {
-<<<<<<< HEAD
-    return (naion_box_get_use_xchacha20() != 0)
-               ? (size_t) naion_box_curve25519xchacha20poly1305_MACBYTES
-               : (size_t) naion_box_curve25519xsalsa20poly1305_MACBYTES;
-=======
     return (size_t) naion_box_curve25519xchacha20poly1305_MACBYTES;
->>>>>>> dev-merge
 }
 
 size_t
 naion_box_sealbytes(void)
 {
-<<<<<<< HEAD
-    return (naion_box_get_use_xchacha20() != 0)
-               ? (size_t) naion_box_curve25519xchacha20poly1305_SEALBYTES
-               : (size_t) naion_box_curve25519xsalsa20poly1305_SEALBYTES;
-=======
     return (size_t) naion_box_curve25519xchacha20poly1305_SEALBYTES;
->>>>>>> dev-merge
 }
 
 int
 naion_box_keypair(unsigned char *pk, unsigned char *sk)
 {
-<<<<<<< HEAD
-    if (naion_box_get_use_xchacha20() != 0) {
-        return naion_box_curve25519xchacha20poly1305_keypair(pk, sk);
-    }
-    return naion_box_curve25519xsalsa20poly1305_keypair(pk, sk);
-=======
 #if NAION_XSALSA20
     if (naion_box_get_use_xchacha20() == 0) {
         return naion_box_curve25519xsalsa20poly1305_keypair(pk, sk);
     }
 #endif
     return naion_box_curve25519xchacha20poly1305_keypair(pk, sk);
->>>>>>> dev-merge
 }
 
 int
 naion_box_seed_keypair(unsigned char *pk, unsigned char *sk, const unsigned char *seed)
 {
-<<<<<<< HEAD
-    if (naion_box_get_use_xchacha20() != 0) {
-        return naion_box_curve25519xchacha20poly1305_seed_keypair(pk, sk, seed);
-    }
-    return naion_box_curve25519xsalsa20poly1305_seed_keypair(pk, sk, seed);
-=======
 #if NAION_XSALSA20
     if (naion_box_get_use_xchacha20() == 0) {
         return naion_box_curve25519xsalsa20poly1305_seed_keypair(pk, sk, seed);
     }
 #endif
     return naion_box_curve25519xchacha20poly1305_seed_keypair(pk, sk, seed);
->>>>>>> dev-merge
 }
 
 int
 naion_box_beforenm(unsigned char *k, const unsigned char *pk, const unsigned char *sk)
 {
-<<<<<<< HEAD
-    if (naion_box_get_use_xchacha20() != 0) {
-        return naion_box_curve25519xchacha20poly1305_beforenm(k, pk, sk);
-    }
-    return naion_box_curve25519xsalsa20poly1305_beforenm(k, pk, sk);
-=======
 #if NAION_XSALSA20
     if (naion_box_get_use_xchacha20() == 0) {
         return naion_box_curve25519xsalsa20poly1305_beforenm(k, pk, sk);
     }
 #endif
     return naion_box_curve25519xchacha20poly1305_beforenm(k, pk, sk);
->>>>>>> dev-merge
 }
 
 int
 naion_box_easy(unsigned char *c, const unsigned char *m, unsigned long long mlen,
                const unsigned char *n, const unsigned char *pk, const unsigned char *sk)
 {
-<<<<<<< HEAD
-    if (naion_box_get_use_xchacha20() != 0) {
-        return naion_box_curve25519xchacha20poly1305_easy(c, m, mlen, n, pk, sk);
-    }
-    return naion_box_curve25519xsalsa20poly1305_easy(c, m, mlen, n, pk, sk);
-=======
 #if NAION_XSALSA20
     if (naion_box_get_use_xchacha20() == 0) {
         return naion_box_curve25519xsalsa20poly1305_easy(c, m, mlen, n, pk, sk);
     }
 #endif
     return naion_box_curve25519xchacha20poly1305_easy(c, m, mlen, n, pk, sk);
->>>>>>> dev-merge
 }
 
 int
 naion_box_open_easy(unsigned char *m, const unsigned char *c, unsigned long long clen,
                     const unsigned char *n, const unsigned char *pk, const unsigned char *sk)
 {
-<<<<<<< HEAD
-    if (naion_box_get_use_xchacha20() != 0) {
-        return naion_box_curve25519xchacha20poly1305_open_easy(m, c, clen, n, pk, sk);
-    }
-    return naion_box_curve25519xsalsa20poly1305_open_easy(m, c, clen, n, pk, sk);
-=======
 #if NAION_XSALSA20
     if (naion_box_get_use_xchacha20() == 0) {
         return naion_box_curve25519xsalsa20poly1305_open_easy(m, c, clen, n, pk, sk);
     }
 #endif
     return naion_box_curve25519xchacha20poly1305_open_easy(m, c, clen, n, pk, sk);
->>>>>>> dev-merge
 }
 
 int
 naion_box_easy_afternm(unsigned char *c, const unsigned char *m, unsigned long long mlen,
                        const unsigned char *n, const unsigned char *k)
 {
-<<<<<<< HEAD
-    if (naion_box_get_use_xchacha20() != 0) {
-        return naion_box_curve25519xchacha20poly1305_easy_afternm(c, m, mlen, n, k);
-    }
-    return naion_box_curve25519xsalsa20poly1305_easy_afternm(c, m, mlen, n, k);
-=======
 #if NAION_XSALSA20
     if (naion_box_get_use_xchacha20() == 0) {
         return naion_box_curve25519xsalsa20poly1305_easy_afternm(c, m, mlen, n, k);
     }
 #endif
     return naion_box_curve25519xchacha20poly1305_easy_afternm(c, m, mlen, n, k);
->>>>>>> dev-merge
 }
 
 int
 naion_box_open_easy_afternm(unsigned char *m, const unsigned char *c, unsigned long long clen,
                             const unsigned char *n, const unsigned char *k)
 {
-<<<<<<< HEAD
-    if (naion_box_get_use_xchacha20() != 0) {
-        return naion_box_curve25519xchacha20poly1305_open_easy_afternm(m, c, clen, n, k);
-    }
-    return naion_box_curve25519xsalsa20poly1305_open_easy_afternm(m, c, clen, n, k);
-=======
 #if NAION_XSALSA20
     if (naion_box_get_use_xchacha20() == 0) {
         return naion_box_curve25519xsalsa20poly1305_open_easy_afternm(m, c, clen, n, k);
     }
 #endif
     return naion_box_curve25519xchacha20poly1305_open_easy_afternm(m, c, clen, n, k);
->>>>>>> dev-merge
 }
 
 int
 naion_box_seal(unsigned char *c, const unsigned char *m, unsigned long long mlen, const unsigned char *pk)
 {
-<<<<<<< HEAD
-    if (naion_box_get_use_xchacha20() != 0) {
-        return naion_box_curve25519xchacha20poly1305_seal(c, m, mlen, pk);
-    }
-    return naion_box_curve25519xsalsa20poly1305_seal(c, m, mlen, pk);
-=======
 #if NAION_XSALSA20
     if (naion_box_get_use_xchacha20() == 0) {
         return naion_box_curve25519xsalsa20poly1305_seal(c, m, mlen, pk);
     }
 #endif
     return naion_box_curve25519xchacha20poly1305_seal(c, m, mlen, pk);
->>>>>>> dev-merge
 }
 
 int
 naion_box_seal_open(unsigned char *m, const unsigned char *c, unsigned long long clen,
                     const unsigned char *pk, const unsigned char *sk)
 {
-<<<<<<< HEAD
-    if (naion_box_get_use_xchacha20() != 0) {
-        return naion_box_curve25519xchacha20poly1305_seal_open(m, c, clen, pk, sk);
-    }
-    return naion_box_curve25519xsalsa20poly1305_seal_open(m, c, clen, pk, sk);
-=======
 #if NAION_XSALSA20
     if (naion_box_get_use_xchacha20() == 0) {
         return naion_box_curve25519xsalsa20poly1305_seal_open(m, c, clen, pk, sk);
     }
 #endif
     return naion_box_curve25519xchacha20poly1305_seal_open(m, c, clen, pk, sk);
->>>>>>> dev-merge
 }
 
 int
@@ -5303,10 +4940,6 @@ naion_sign_ed25519_sk_to_curve25519(unsigned char *curve25519_sk,
     return SIMPLE_SODIUM_OK;
 }
 
-<<<<<<< HEAD
-
-
-=======
 /* ------------------------------------------------------------------------- */
 /* CSM (client/server secure messaging) implementation.                     */
 /* Merged from the former csm.h. Uses the unified goto cleanup pattern:      */
@@ -6618,7 +6251,6 @@ int naion_csm_sess_server_decrypt(
 }
 
 #endif /* NAION_LAYER_CSM_SESSION */
->>>>>>> dev-merge
 
 #endif /* NAION_IMPLEMENTATION */
 #endif /* NAION_H */

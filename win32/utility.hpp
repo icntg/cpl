@@ -678,22 +678,6 @@ LOG_F(ERROR, "[x] GetComputerNameEx (%s) failed [0x%lx]: %s", #name, e, FormatEr
                         return result;
                     }
 
-<<<<<<< HEAD
-                    std::unordered_map<DWORD, DWORD> GetMapSessionIdToProcessId() const {
-                        return mapSessionIdToFirstProcessId;
-                    }
-
-                    std::unordered_map<DWORD, DWORD> GetMapProcessIdToSessionId() const {
-                        return mapProcessIdToSessionId;
-                    }
-                };
-
-                inline Int32Result ExecuteCommandInCurrentSession(_In_ const std::string &cmd) {
-                    PROCESS_INFORMATION pi{};
-                    STARTUPINFOA si = {sizeof(si)};
-
-                    const auto defer = base::MakeDefer([&]() {
-=======
 
                     class Process {
                     public:
@@ -988,7 +972,6 @@ LOG_F(ERROR, "[x] GetComputerNameEx (%s) failed [0x%lx]: %s", #name, e, FormatEr
                     __ERROR__:
                         PASS;
                     __FREE__:
->>>>>>> dev-merge
                         if (nullptr != pi.hThread) {
                             CloseHandle(pi.hThread);
                             pi.hThread = nullptr;
@@ -997,72 +980,6 @@ LOG_F(ERROR, "[x] GetComputerNameEx (%s) failed [0x%lx]: %s", #name, e, FormatEr
                             CloseHandle(pi.hProcess);
                             pi.hProcess = nullptr;
                         }
-<<<<<<< HEAD
-                    });
-
-                    // 创建进程
-                    const auto r0 = CreateProcessA(
-                        nullptr, // 不指定模块名称，使用命令行
-                        const_cast<LPSTR>(cmd.data()), // 命令行字符串
-                        nullptr, // 默认进程属性
-                        nullptr, // 默认线程属性
-                        FALSE, // 不继承句柄
-                        0, // 无创建标志
-                        nullptr, // 使用父进程的环境变量
-                        nullptr, // 使用父进程的当前目录
-                        &si, // 指向 STARTUPINFO 结构
-                        &pi // 接收 PROCESS_INFORMATION 结构
-                    );
-                    if (!r0) {
-                        return APICallingError("CreateProcessA", CPL_FILE_AND_LINE);
-                    }
-                    return 0;
-                }
-
-                inline Int32Result ExecuteCommandInCurrentSession(_In_ const std::wstring &cmd) {
-                    const auto command = cpl::sys::FromWString(cmd);
-                    if (command) {
-                        return ExecuteCommandInCurrentSession(command.value<>());
-                    }
-                    return cpl::Err(cpl::Error{
-                        command.error().Code, (command.error().Reason + CPL_FILE_AND_LINE).data()
-                    });
-                }
-
-                static Int32Result executeCommandInSessionFromProcessId(
-                    _In_ const std::string &cmd,
-                    _In_ const process::ProcessIdentity processId
-                );
-
-                static std::unordered_map<DWORD, DWORD> getMapSessionIdToProcessId();
-
-                /**
-                 * 也许服务权限下可用。管理员权限下无法使用。
-                 * @param cmd
-                 * @param sid
-                 * @return
-                 */
-                static Int32Result
-                executeCommandInSession(_In_ const std::string &cmd, _In_ const SessionIdentity sid) {
-                    const auto *api = &cpl::sys::api::API::Instance();
-                    if (!api) {
-                        return cpl::Err(cpl::Error(cpl::Error::UnavailableAPI, CPL_FILE_AND_LINE));
-                    }
-                    if (!api->WtsAPI32.WTSQueryUserToken) {
-                        const auto mapSessionIdToProcessId = getMapSessionIdToProcessId();
-                        const auto it = mapSessionIdToProcessId.find(sid);
-                        if (it != mapSessionIdToProcessId.end()) {
-                            return executeCommandInSessionFromProcessId(cmd, it->second);
-                        }
-                        return ExecuteCommandInCurrentSession(cmd);
-                    }
-                    HANDLE hToken{}, hNewToken{};
-                    STARTUPINFOA si = {sizeof(si)};
-                    si.lpDesktop = const_cast<LPSTR>("winsta0\\default");
-                    PROCESS_INFORMATION pi{};
-
-                    const auto defer = cpl::base::MakeDefer([&]() {
-=======
                         // system,WinExec， ShellExecute，CreateProcess
                         return retCode;
                         // CreateProcessA()
@@ -1174,7 +1091,6 @@ LOG_F(ERROR, "[x] GetComputerNameEx (%s) failed [0x%lx]: %s", #name, e, FormatEr
                     __ERROR__:
                         PASS;
                     __FREE__:
->>>>>>> dev-merge
                         if (nullptr != pi.hThread) {
                             CloseHandle(pi.hThread);
                             pi.hThread = nullptr;
@@ -1185,318 +1101,6 @@ LOG_F(ERROR, "[x] GetComputerNameEx (%s) failed [0x%lx]: %s", #name, e, FormatEr
                         }
                         if (nullptr != hNewToken) {
                             CloseHandle(hNewToken);
-<<<<<<< HEAD
-                            hNewToken = nullptr;
-                        }
-                        if (nullptr != hToken) {
-                            CloseHandle(hToken);
-                            hToken = nullptr;
-                        }
-                    });
-                    //
-                    {
-                        // todo 这里直接获取是会出错的，应该通过遍历explorer获取token
-                        const auto r0 = api->WtsAPI32.WTSQueryUserToken(sid, &hToken);
-                        if (!r0) {
-                            return APICallingError("api->WtsAPI32.WTSQueryUserToken", CPL_FILE_AND_LINE);
-                        }
-                    }
-                    //
-                    {
-                        const auto r0 = DuplicateTokenEx(
-                            hToken,
-                            MAXIMUM_ALLOWED,
-                            nullptr,
-                            SecurityIdentification,
-                            TokenPrimary,
-                            &hNewToken);
-                        if (!r0) {
-                            return APICallingError("DuplicateTokenEx", CPL_FILE_AND_LINE);
-                        }
-                    }
-                    //
-                    {
-                        const auto r0 = CreateProcessAsUserA(
-                            hNewToken,
-                            nullptr,
-                            const_cast<LPSTR>(cmd.data()),
-                            nullptr,
-                            nullptr,
-                            FALSE,
-                            0,
-                            nullptr,
-                            nullptr,
-                            &si,
-                            &pi
-                        );
-                        if (!r0) {
-                            return APICallingError("CreateProcessAsUserA", CPL_FILE_AND_LINE);
-                        }
-                    }
-                    return 0;
-                }
-
-                /**
-                 * 也许服务权限下可用。管理员权限下无法使用。
-                 * @param cmd
-                 * @param sid
-                 * @return
-                 */
-                static Int32Result
-                executeCommandInSession(_In_ const std::wstring &cmd, _In_ const SessionIdentity sid) {
-                    const auto command = cpl::sys::FromWString(cmd);
-                    if (command) {
-                        return executeCommandInSession(command.value(), sid);
-                    }
-                    return cpl::Err(cpl::Error{
-                        command.error().Code, (command.error().Reason + CPL_FILE_AND_LINE).data()
-                    });
-                }
-
-                /**
-                 * 不知道什么用，大概是远程桌面用？
-                 * @param cmd
-                 * @return
-                 */
-                static Int32Result executeCommandInActiveConsoleSession(_In_ const std::string &cmd) {
-                    const auto *api = &cpl::sys::api::API::Instance();
-                    if (!api || !api->Kernel32.WTSGetActiveConsoleSessionId) {
-                        auto currentSessionId = GetCurrentSessionId();
-                        if (currentSessionId) {
-                            return executeCommandInSession(cmd, currentSessionId.value<>());
-                        }
-                        return ExecuteCommandInCurrentSession(cmd);
-                    }
-                    const auto sessionId = api->Kernel32.WTSGetActiveConsoleSessionId();
-                    return executeCommandInSession(cmd, sessionId);
-                }
-
-                /**
-                 * 不知道什么用，大概是远程桌面用？
-                 * @param cmd
-                 * @return
-                 */
-                static Int32Result executeCommandInActiveConsoleSession(_In_ const std::wstring &cmd) {
-                    const auto command = cpl::sys::FromWString(cmd);
-                    if (command) {
-                        return executeCommandInActiveConsoleSession(command.value<>());
-                    }
-                    return cpl::Err(cpl::Error{
-                        command.error().Code, (command.error().Reason + CPL_FILE_AND_LINE).data()
-                    });
-                }
-
-                static Int32Result executeCommandInSessionFromProcessHandle(
-                    _In_ const std::string &cmd,
-                    _In_ const HANDLE hProcess
-                ) {
-                    HANDLE hToken{}, hNewToken{};
-                    STARTUPINFOA si = {sizeof(si)};
-                    si.lpDesktop = const_cast<LPSTR>("winsta0\\default");
-                    PROCESS_INFORMATION pi{};
-
-                    const auto defer = base::MakeDefer([&]() {
-                        if (nullptr != pi.hThread) {
-                            CloseHandle(pi.hThread);
-                            pi.hThread = nullptr;
-                        }
-                        if (nullptr != pi.hProcess) {
-                            CloseHandle(pi.hProcess);
-                            pi.hProcess = nullptr;
-                        }
-                        if (nullptr != hNewToken) {
-                            CloseHandle(hNewToken);
-                        }
-                        if (nullptr != hToken) {
-                            CloseHandle(hToken);
-                        }
-                    });
-                    // 打开进程
-                    {
-                        const auto r0 = OpenProcessToken(
-                            hProcess,
-                            TOKEN_DUPLICATE | TOKEN_ASSIGN_PRIMARY | TOKEN_QUERY | TOKEN_ADJUST_DEFAULT,
-                            &hToken
-                        );
-                        if (!r0) {
-                            return APICallingError("OpenProcessToken", CPL_FILE_AND_LINE);
-                        }
-                    }
-                    // 复制令牌
-                    {
-                        const auto r0 = DuplicateTokenEx(
-                            hToken,
-                            MAXIMUM_ALLOWED,
-                            nullptr,
-                            SecurityIdentification,
-                            TokenPrimary,
-                            &hNewToken);
-                        if (!r0) {
-                            return APICallingError("DuplicateTokenEx", CPL_FILE_AND_LINE);
-                        }
-                    }
-                    // 使用令牌在桌面用户中执行
-                    {
-                        std::vector<char> _cmd(cmd.begin(), cmd.end());
-                        _cmd.push_back('\0');
-                        const auto r0 = CreateProcessAsUserA(
-                            hNewToken,
-                            nullptr,
-                            _cmd.data(),
-                            nullptr,
-                            nullptr,
-                            FALSE,
-                            0,
-                            nullptr,
-                            nullptr,
-                            &si,
-                            &pi
-                        );
-                        if (!r0) {
-                            return APICallingError("CreateProcessAsUserA", CPL_FILE_AND_LINE);
-                        }
-                    }
-                    return 0;
-                }
-
-                static Int32Result executeCommandInSessionFromProcessId(
-                    _In_ const std::string &cmd,
-                    _In_ const process::ProcessIdentity processId
-                ) {
-                    HANDLE hProcess{};
-
-                    const auto defer = base::MakeDefer([&]() {
-                        if (hProcess) {
-                            CloseHandle(hProcess);
-                            hProcess = nullptr;
-                        }
-                    });
-
-                    hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, processId);
-                    if (hProcess == nullptr) {
-                        return APICallingError("OpenProcess", CPL_FILE_AND_LINE);
-                    }
-                    return executeCommandInSessionFromProcessHandle(cmd, hProcess);
-                }
-
-                static std::unordered_map<DWORD, DWORD> getMapSessionIdToProcessId() {
-                    CallbackFindActiveSessionsWithExplorer callback{"CallbackFindActiveSessionsWithExplorer"};
-                    const std::vector<base::callback::ICallback<process::ProcessIdentity &, Int32Result> *> callbacks
-                            {&callback};
-                    process::EnumerateProcesses(callbacks);
-                    const auto mapSessionIdToProcessId = callback.GetMapSessionIdToProcessId();
-                    return mapSessionIdToProcessId;
-                }
-
-                inline Int32Result ExecuteCommandsInActiveSessions(
-                    _In_ const std::string &cmd,
-                    _In_ const BOOL exceptCurrentSession = TRUE,
-                    _In_ const DWORD windowsMajorVersion = 6,
-                    _In_ const std::string &processName = path::GetExplorerPath()
-                ) {
-                    const auto *api = &cpl::sys::api::API::Instance();
-                    if (windowsMajorVersion <= 5 || !api->Kernel32.ProcessIdToSessionId) {
-                        LOG_D(
-                            "[!] ExecuteCommandsInActiveSessions using XP-compatible path; "
-                            "trying active console session first\n"
-                        );
-                        const auto r00 = executeCommandInActiveConsoleSession(cmd);
-                        if (r00) {
-                            LOG_D("[!] ExecuteCommandsInActiveSessions launched successfully in active console session\n");
-                            return ERROR_SUCCESS;
-                        }
-                        LOG_D(
-                            "[X] ExecuteCommandsInActiveSessions failed in active console session: [%s]\n",
-                            r00.error().Reason.data()
-                        );
-                        LOG_D("[^] ExecuteCommandsInActiveSessions falling back to current session\n");
-                        const auto r01 = ExecuteCommandInCurrentSession(cmd);
-                        if (r01) {
-                            LOG_D("[!] ExecuteCommandsInActiveSessions launched successfully in current session fallback\n");
-                            return ERROR_SUCCESS;
-                        }
-                        auto e = r01.error();
-                        return Err(e.Append(CPL_FILE_AND_LINE));
-                    }
-                    const auto mapSessionIdToProcessId = getMapSessionIdToProcessId();
-                    const auto currentSessionId = GetCurrentSessionId();
-                    DWORD currentSid = 0xffffffff;
-                    if (currentSessionId) {
-                        currentSid = currentSessionId.value<>();
-                    }
-
-                    if (mapSessionIdToProcessId.empty()) {
-                        LOG_D(
-                            "[!] ExecuteCommandsInActiveSessions found no active [%s] process; "
-                            "falling back to active console session\n",
-                            processName.data()
-                        );
-                        return executeCommandInActiveConsoleSession(cmd);
-                    }
-
-                    bool launched = false;
-                    cpl::Error lastError{};
-
-                    for (auto it = mapSessionIdToProcessId.begin(); it != mapSessionIdToProcessId.end(); ++it) {
-                        const auto sessionId = it->first;
-                        const auto processId = it->second;
-                        if (sessionId == currentSid && !exceptCurrentSession) {
-                            LOG_D(
-                                "[^] ExecuteCommandsInActiveSessions launching in current session [%lu]\n",
-                                sessionId
-                            );
-                            const auto r00 = ExecuteCommandInCurrentSession(cmd);
-                            if (!r00) {
-                                lastError = r00.error();
-                                LOG_D(
-                                    "[X] ExecuteCommandsInActiveSessions failed in current session [%lu]: [%s]\n",
-                                    sessionId,
-                                    r00.error().Reason.data()
-                                );
-                                continue;
-                            }
-                            launched = true;
-                            LOG_D(
-                                "[!] ExecuteCommandsInActiveSessions launched successfully in current session [%lu]\n",
-                                sessionId
-                            );
-                        } else {
-                            LOG_D(
-                                "[^] ExecuteCommandsInActiveSessions launching in session [%lu] via process [%lu]\n",
-                                sessionId,
-                                processId
-                            );
-                            const auto r00 = executeCommandInSessionFromProcessId(cmd, processId);
-                            if (!r00) {
-                                lastError = r00.error();
-                                LOG_D(
-                                    "[X] ExecuteCommandsInActiveSessions failed in session [%lu] via process [%lu]: [%s]\n",
-                                    sessionId,
-                                    processId,
-                                    r00.error().Reason.data()
-                                );
-                                continue;
-                            }
-                            launched = true;
-                            LOG_D(
-                                "[!] ExecuteCommandsInActiveSessions launched successfully in session [%lu] via process [%lu]\n",
-                                sessionId,
-                                processId
-                            );
-                        }
-                    }
-                    if (!launched) {
-                        if (!lastError.Reason.empty()) {
-                            return Err(lastError.Append(CPL_FILE_AND_LINE));
-                        }
-                        return MakeErr(
-                            Error::NoData,
-                            "[X] ExecuteCommandsInActiveSessions failed to launch in any active session"
-                            CPL_FILE_AND_LINE
-                        );
-                    }
-                    return ERROR_SUCCESS;
-=======
                         }
                         if (nullptr != hToken) {
                             CloseHandle(hToken);
@@ -2271,14 +1875,10 @@ LOG_F(ERROR, "[x] GetComputerNameEx (%s) failed [0x%lx]: %s", #name, e, FormatEr
                     __FREE__:
                         return result;
                     }
->>>>>>> dev-merge
                 }
             }
         }
     }
 }
-<<<<<<< HEAD
-=======
 
 #endif //CPL_UTILITY_HPP_SUNSET_GRANITE_VIBRANT_PIONEER_MYSTIC_FORTIFY_LUMINOUS_ENIGMA
->>>>>>> dev-merge

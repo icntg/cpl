@@ -337,8 +337,5 @@ namespace cpl {
         }
     }
 }
-<<<<<<< HEAD
-=======
 
 #endif //CPL_NETWORK_HPP_FLICKER_MIGHTY_BLOSSOM_GLIDE_RHYTHM_PULSE_TURBULENCE_ECHO
->>>>>>> dev-merge
