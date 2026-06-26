@@ -3339,6 +3339,414 @@ static int test_csm_ca_null_errors(void)
 #endif /* NAION_LAYER_CSM_CA */
 
 /* ========================================================================= */
+/* Section 4C — CSM-Session (Layer 5, ephemeral-ephemeral DH, PFS)          */
+/* ========================================================================= */
+#if NAION_LAYER_CSM_SESSION
+
+/* Build a CA signature over a server Ed25519 pk using an offline CA seed. */
+static void sess_ca_make_cert(const unsigned char ca_seed[32],
+                               const unsigned char server_ed_pk[32],
+                               unsigned char ca_sig_out[64])
+{
+    unsigned char ca_pk[32], ca_sk[64];
+    unsigned long long sl = 0;
+    (void) naion_sign_ed25519_seed_keypair(ca_pk, ca_sk, ca_seed);
+    (void) naion_sign_ed25519_detached(ca_sig_out, &sl, server_ed_pk, 32, ca_sk);
+}
+
+/* T5.1 */
+static int test_csm_sess_client_create(void)
+{
+    naion_csm_sess_client c;
+    unsigned char seed[32], ca_pk[32];
+
+    TEST_BEGIN("test_csm_sess_client_create");
+    derive_key(seed, 32, "sess-c-seed");
+    derive_key(ca_pk, 32, "sess-ca-pk");
+    CHECK_CSM(naion_csm_sess_client_create(&c, seed, ca_pk), NAION_CSM_OK);
+    CHECK(c.handshake_complete == 0);
+    CHECK(naion_is_zero(c.ed_public_key, 32) == 0);
+    TEST_END();
+}
+
+/* T5.2 */
+static int test_csm_sess_server_create(void)
+{
+    naion_csm_sess_server s;
+    unsigned char seed[32], ca_sig[64];
+
+    TEST_BEGIN("test_csm_sess_server_create");
+    derive_key(seed, 32, "sess-s-seed");
+    memset(ca_sig, 0x5a, sizeof ca_sig);
+    CHECK_CSM(naion_csm_sess_server_create(&s, seed, ca_sig), NAION_CSM_OK);
+    CHECK(s.handshake_complete == 0);
+    CHECK(naion_is_zero(s.ed_public_key, 32) == 0);
+    TEST_END();
+}
+
+/* T5.3 */
+static int test_csm_sess_constants(void)
+{
+    TEST_BEGIN("test_csm_sess_constants");
+    CHECK(NAION_CSM_SESS_CLIENT_HELLO_BYTES == 128);
+    CHECK(NAION_CSM_SESS_SERVER_RESPONSE_BYTES == 192);
+    CHECK(NAION_CSM_SESS_PACKET_OVERHEAD == 104);
+    CHECK(NAION_CSM_SESS_MAX_CLIENT_PAYLOAD_BYTES == 920);
+    CHECK(NAION_CSM_SESS_MAX_SERVER_PAYLOAD_BYTES == 920);
+    TEST_END();
+}
+
+/* T5.4 — CLIENT_HELLO structure: xpk(32) || ed_pk(32) || sig(64) */
+static int test_csm_sess_client_hello(void)
+{
+    naion_csm_sess_client c;
+    unsigned char seed[32], ca_pk[32];
+    unsigned char hello[NAION_CSM_SESS_CLIENT_HELLO_BYTES];
+
+    TEST_BEGIN("test_csm_sess_client_hello");
+    derive_key(seed, 32, "sess-c-seed");
+    derive_key(ca_pk, 32, "sess-ca-pk");
+    CHECK_CSM(naion_csm_sess_client_create(&c, seed, ca_pk), NAION_CSM_OK);
+    CHECK_CSM(naion_csm_sess_client_hello(&c, hello), NAION_CSM_OK);
+    /* layout: client_session_xpk(32) || client_ed_pk(32) || sig(64) */
+    CHECK(naion_memcmp(hello, c.client_session_xpk, 32) == 0);
+    CHECK(naion_memcmp(hello + 32, c.ed_public_key, 32) == 0);
+    /* signature must verify over client_session_xpk with client_ed_pk */
+    CHECK_OK(naion_sign_ed25519_verify_detached(hello + 64, hello, 32, hello + 32));
+    TEST_END();
+}
+
+/* T5.5 — full 1-RTT handshake helper used by the traffic tests below. */
+static void sess_handshake_pair(naion_csm_sess_client *c, naion_csm_sess_server *s)
+{
+    unsigned char cseed[32], sseed[32], ca_seed[32], ca_pk[32], ca_sig[64];
+    unsigned char hello[NAION_CSM_SESS_CLIENT_HELLO_BYTES];
+    unsigned char m1[NAION_CSM_SESS_SERVER_RESPONSE_BYTES];
+    size_t out_len = 0;
+
+    derive_key(cseed, 32, "sess-c-seed");
+    derive_key(sseed, 32, "sess-s-seed");
+    derive_key(ca_seed, 32, "sess-ca-seed");
+    {
+        unsigned char ca_sk[64];
+        (void) naion_sign_ed25519_seed_keypair(ca_pk, ca_sk, ca_seed);
+    }
+    memset(ca_sig, 0, sizeof ca_sig);
+    (void) naion_csm_sess_server_create(s, sseed, ca_sig);
+    sess_ca_make_cert(ca_seed, s->ed_public_key, ca_sig);
+    memcpy(s->ca_signature, ca_sig, 64);
+    (void) naion_csm_sess_client_create(c, cseed, ca_pk);
+    (void) naion_csm_sess_client_hello(c, hello);
+    (void) naion_csm_sess_server_handshake(s, hello, m1, sizeof m1, &out_len);
+    (void) naion_csm_sess_client_finish(c, m1, out_len);
+}
+
+/* T5.6 */
+static int test_csm_sess_handshake_flow(void)
+{
+    naion_csm_sess_client c;
+    naion_csm_sess_server s;
+
+    TEST_BEGIN("test_csm_sess_handshake_flow");
+    sess_handshake_pair(&c, &s);
+    CHECK(c.handshake_complete == 1);
+    CHECK(s.handshake_complete == 1);
+    /* server learnt the client identity ... */
+    CHECK(naion_memcmp(s.client_ed_public_key, c.ed_public_key, 32) == 0);
+    /* ... and the client learnt the server identity via the CA chain */
+    CHECK(naion_memcmp(c.server_ed_public_key, s.ed_public_key, 32) == 0);
+    /* forward-secrecy invariant: both sides derived the same session AEAD key */
+    CHECK(naion_memcmp(c.session_aead_key, s.session_aead_key, 32) == 0);
+    TEST_END();
+}
+
+/* T5.7 — bad CLIENT_HELLO must not allocate any server session state. */
+static int test_csm_sess_server_handshake_reject(void)
+{
+    naion_csm_sess_client c;
+    naion_csm_sess_server s;
+    unsigned char hello[NAION_CSM_SESS_CLIENT_HELLO_BYTES];
+    unsigned char m1[NAION_CSM_SESS_SERVER_RESPONSE_BYTES];
+    unsigned char snapshot[sizeof(s)];
+    size_t out_len = 0;
+
+    TEST_BEGIN("test_csm_sess_server_handshake_reject");
+    sess_handshake_pair(&c, &s);
+    /* reset server to pre-handshake state */
+    {
+        unsigned char sseed[32], ca_seed[32], ca_sig[64];
+        derive_key(sseed, 32, "sess-s-seed");
+        derive_key(ca_seed, 32, "sess-ca-seed");
+        memset(ca_sig, 0, sizeof ca_sig);
+        (void) naion_csm_sess_server_create(&s, sseed, ca_sig);
+        sess_ca_make_cert(ca_seed, s.ed_public_key, ca_sig);
+        memcpy(s.ca_signature, ca_sig, 64);
+    }
+    memcpy(snapshot, &s, sizeof snapshot);
+
+    /* zero client_session_xpk */
+    memset(hello, 0, sizeof hello);
+    CHECK_CSM(naion_csm_sess_server_handshake(&s, hello, m1, sizeof m1, &out_len),
+              NAION_CSM_ERR_INVALID_ARGUMENT);
+    /* build a real hello, then tamper the signature */
+    CHECK_CSM(naion_csm_sess_client_hello(&c, hello), NAION_CSM_OK);
+    hello[64] ^= 0xff;
+    CHECK_CSM(naion_csm_sess_server_handshake(&s, hello, m1, sizeof m1, &out_len),
+              NAION_CSM_ERR_VERIFY_FAILED);
+    hello[64] ^= 0xff;
+    /* tamper client_ed_pk instead */
+    hello[32] ^= 0xff;
+    CHECK_CSM(naion_csm_sess_server_handshake(&s, hello, m1, sizeof m1, &out_len),
+              NAION_CSM_ERR_VERIFY_FAILED);
+    hello[32] ^= 0xff;
+
+    /* on every rejected path the server state is unchanged */
+    CHECK(naion_memcmp(snapshot, &s, sizeof snapshot) == 0);
+    CHECK(s.handshake_complete == 0);
+    TEST_END();
+}
+
+/* T5.8 — client_finish certificate-chain verification. */
+static int test_csm_sess_client_finish_reject(void)
+{
+    naion_csm_sess_client c;
+    naion_csm_sess_server s;
+    unsigned char hello[NAION_CSM_SESS_CLIENT_HELLO_BYTES];
+    unsigned char m1[NAION_CSM_SESS_SERVER_RESPONSE_BYTES];
+    size_t out_len = 0;
+
+    TEST_BEGIN("test_csm_sess_client_finish_reject");
+    sess_handshake_pair(&c, &s);
+    /* reset to a fresh pre-handshake client */
+    {
+        unsigned char cseed[32], ca_pk[32];
+        derive_key(cseed, 32, "sess-c-seed");
+        derive_key(ca_pk, 32, "sess-ca-pk");
+        /* deliberately use a *different* CA pk from the one that signed the server */
+        derive_key(ca_pk, 32, "sess-wrong-ca");
+        (void) naion_csm_sess_client_create(&c, cseed, ca_pk);
+    }
+    CHECK_CSM(naion_csm_sess_client_hello(&c, hello), NAION_CSM_OK);
+    CHECK_CSM(naion_csm_sess_server_handshake(&s, hello, m1, sizeof m1, &out_len), NAION_CSM_OK);
+
+    /* wrong m1 size */
+    CHECK_CSM(naion_csm_sess_client_finish(&c, m1, 191), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_client_finish(&c, m1, 193), NAION_CSM_ERR_INVALID_ARGUMENT);
+    /* wrong CA */
+    CHECK_CSM(naion_csm_sess_client_finish(&c, m1, out_len), NAION_CSM_ERR_VERIFY_FAILED);
+    CHECK(c.handshake_complete == 0);
+    /* tamper CA signature */
+    m1[160] ^= 0xff;
+    CHECK_CSM(naion_csm_sess_client_finish(&c, m1, out_len), NAION_CSM_ERR_VERIFY_FAILED);
+    m1[160] ^= 0xff;
+    TEST_END();
+}
+
+/* T5.9 — bidirectional traffic over the session key, no per-packet DH. */
+static int test_csm_sess_full_flow(void)
+{
+    static const size_t plens[] = { 1, 32, 256, NAION_CSM_SESS_MAX_CLIENT_PAYLOAD_BYTES };
+    naion_csm_sess_client c;
+    naion_csm_sess_server s;
+    unsigned char *pt = g_buf_a, *pkt = g_buf_b, *out = g_buf_c;
+    size_t pkt_len = 0, out_len = 0;
+    size_t li;
+
+    TEST_BEGIN("test_csm_sess_full_flow");
+    sess_handshake_pair(&c, &s);
+    CHECK(c.handshake_complete == 1);
+    CHECK(s.handshake_complete == 1);
+
+    for (li = 0; li < sizeof plens / sizeof plens[0]; li++) {
+        size_t n = plens[li];
+        fill_pattern(pt, n, 0xa1);
+        /* C -> S */
+        CHECK(naion_csm_sess_client_encrypt_size(n) == 104 + n);
+        CHECK_CSM(naion_csm_sess_client_encrypt(&c, pt, n, pkt, NAION_CSM_SESS_MAX_UDP_DATAGRAM_BYTES, &pkt_len),
+                  NAION_CSM_OK);
+        CHECK(pkt_len == 104 + n);
+        CHECK_CSM(naion_csm_sess_server_decrypt(&s, pkt, pkt_len, out, NAION_CSM_SESS_MAX_UDP_DATAGRAM_BYTES, &out_len),
+                  NAION_CSM_OK);
+        CHECK(out_len == n);
+        CHECK(naion_memcmp(pt, out, n) == 0);
+        /* S -> C */
+        CHECK_CSM(naion_csm_sess_server_encrypt(&s, pt, n, pkt, NAION_CSM_SESS_MAX_UDP_DATAGRAM_BYTES, &pkt_len),
+                  NAION_CSM_OK);
+        CHECK_CSM(naion_csm_sess_client_decrypt(&c, pkt, pkt_len, out, NAION_CSM_SESS_MAX_UDP_DATAGRAM_BYTES, &out_len),
+                  NAION_CSM_OK);
+        CHECK(out_len == n);
+        CHECK(naion_memcmp(pt, out, n) == 0);
+    }
+    TEST_END();
+}
+
+/* T5.10 */
+static int test_csm_sess_encrypt_before_handshake(void)
+{
+    naion_csm_sess_client c;
+    naion_csm_sess_server s;
+    unsigned char pt[32], pkt[256];
+    size_t pkt_len = 0;
+
+    TEST_BEGIN("test_csm_sess_encrypt_before_handshake");
+    {
+        unsigned char cseed[32], sseed[32], ca_pk[32], ca_sig[64];
+        derive_key(cseed, 32, "sess-c-seed");
+        derive_key(sseed, 32, "sess-s-seed");
+        derive_key(ca_pk, 32, "sess-ca-pk");
+        memset(ca_sig, 0, sizeof ca_sig);
+        (void) naion_csm_sess_client_create(&c, cseed, ca_pk);
+        (void) naion_csm_sess_server_create(&s, sseed, ca_sig);
+    }
+    fill_pattern(pt, 32, 0xa2);
+    CHECK_CSM(naion_csm_sess_client_encrypt(&c, pt, 32, pkt, sizeof pkt, &pkt_len),
+              NAION_CSM_ERR_STATE);
+    CHECK_CSM(naion_csm_sess_server_encrypt(&s, pt, 32, pkt, sizeof pkt, &pkt_len),
+              NAION_CSM_ERR_STATE);
+    CHECK_CSM(naion_csm_sess_client_decrypt(&c, pt, 32, pkt, sizeof pkt, &pkt_len),
+              NAION_CSM_ERR_STATE);
+    CHECK_CSM(naion_csm_sess_server_decrypt(&s, pt, 32, pkt, sizeof pkt, &pkt_len),
+              NAION_CSM_ERR_STATE);
+    TEST_END();
+}
+
+/* T5.11 */
+static int test_csm_sess_size_functions(void)
+{
+    static const size_t plens[] = { 1, 32, 256, NAION_CSM_SESS_MAX_CLIENT_PAYLOAD_BYTES };
+    size_t li;
+
+    TEST_BEGIN("test_csm_sess_size_functions");
+    for (li = 0; li < sizeof plens / sizeof plens[0]; li++) {
+        size_t n = plens[li];
+        CHECK(naion_csm_sess_client_encrypt_size(n) == 104 + n);
+        CHECK(naion_csm_sess_server_encrypt_size(n) == 104 + n);
+        CHECK(naion_csm_sess_client_decrypt_max_plaintext_size(104 + n) == n);
+        CHECK(naion_csm_sess_server_decrypt_max_plaintext_size(104 + n) == n);
+    }
+    CHECK(naion_csm_sess_client_decrypt_max_plaintext_size(104) == 0);
+    CHECK(naion_csm_sess_server_decrypt_max_plaintext_size(0) == 0);
+    TEST_END();
+}
+
+/* T5.12 */
+static int test_csm_sess_wipe(void)
+{
+    naion_csm_sess_client c;
+    naion_csm_sess_server s;
+
+    TEST_BEGIN("test_csm_sess_wipe");
+    sess_handshake_pair(&c, &s);
+    naion_csm_sess_client_wipe(&c);
+    naion_csm_sess_server_wipe(&s);
+    CHECK(c.handshake_complete == 0);
+    CHECK(s.handshake_complete == 0);
+    CHECK(naion_is_zero((const unsigned char *) &c, sizeof c) == 1);
+    CHECK(naion_is_zero((const unsigned char *) &s, sizeof s) == 1);
+    TEST_END();
+}
+
+/* T5.13 — verify-then-decrypt: any tamper (sig / nonce / mac / ct) is rejected. */
+static int test_csm_sess_tamper(void)
+{
+    naion_csm_sess_client c;
+    naion_csm_sess_server s;
+    unsigned char pt[32], *pkt = g_buf_a, *out = g_buf_b;
+    size_t pkt_len = 0, out_len = 0;
+    size_t offs[] = { 0, 63, 64, 87, 88, 103, 104, 120 };
+    size_t oi;
+
+    TEST_BEGIN("test_csm_sess_tamper");
+    sess_handshake_pair(&c, &s);
+    fill_pattern(pt, 32, 0xa4);
+    CHECK_CSM(naion_csm_sess_client_encrypt(&c, pt, 32, pkt, NAION_CSM_SESS_MAX_UDP_DATAGRAM_BYTES, &pkt_len),
+              NAION_CSM_OK);
+    /* signature tamper -> VERIFY_FAILED (no AEAD work) */
+    pkt[0] ^= 0xff;
+    CHECK_CSM(naion_csm_sess_server_decrypt(&s, pkt, pkt_len, out, NAION_CSM_SESS_MAX_UDP_DATAGRAM_BYTES, &out_len),
+              NAION_CSM_ERR_VERIFY_FAILED);
+    pkt[0] ^= 0xff;
+    /* nonce / mac / ciphertext tamper -> signature still valid, AEAD fails */
+    for (oi = 0; oi < sizeof offs / sizeof offs[0]; oi++) {
+        size_t off = offs[oi];
+        pkt[off] ^= 0xff;
+        out_len = 0;
+        {
+            int rc = naion_csm_sess_server_decrypt(&s, pkt, pkt_len, out,
+                                                   NAION_CSM_SESS_MAX_UDP_DATAGRAM_BYTES, &out_len);
+            /* off >= 64 corrupts body and therefore the signed bytes -> VERIFY_FAILED;
+             * otherwise the signature is intact and the AEAD layer rejects it. */
+            if (off < 64) {
+                CHECK_CSM(rc, NAION_CSM_ERR_VERIFY_FAILED);
+            } else {
+                CHECK(rc == NAION_CSM_ERR_VERIFY_FAILED || rc == NAION_CSM_ERR_CRYPTO);
+            }
+        }
+        pkt[off] ^= 0xff;
+    }
+    TEST_END();
+}
+
+/* T5.14 */
+static int test_csm_sess_null_errors(void)
+{
+    naion_csm_sess_client c;
+    naion_csm_sess_server s;
+    unsigned char seed[32], ca_pk[32], ca_sig[64], buf[256], pt[32];
+    unsigned char hello[NAION_CSM_SESS_CLIENT_HELLO_BYTES];
+    unsigned char m1[NAION_CSM_SESS_SERVER_RESPONSE_BYTES];
+    size_t len = 0;
+
+    TEST_BEGIN("test_csm_sess_null_errors");
+    derive_key(seed, 32, "sess-c-seed");
+    derive_key(ca_pk, 32, "sess-ca-pk");
+    memset(ca_sig, 0x5a, sizeof ca_sig);
+    sess_handshake_pair(&c, &s);
+    fill_pattern(pt, 32, 0xa5);
+
+    /* create NULLs */
+    CHECK_CSM(naion_csm_sess_client_create(NULL, seed, ca_pk), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_client_create(&c, NULL, ca_pk), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_client_create(&c, seed, NULL), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_server_create(NULL, seed, ca_sig), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_server_create(&s, NULL, ca_sig), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_server_create(&s, seed, NULL), NAION_CSM_ERR_INVALID_ARGUMENT);
+
+    /* hello NULLs */
+    CHECK_CSM(naion_csm_sess_client_hello(NULL, hello), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_client_hello(&c, NULL), NAION_CSM_ERR_INVALID_ARGUMENT);
+
+    /* server_handshake NULLs */
+    CHECK_CSM(naion_csm_sess_server_handshake(NULL, hello, m1, sizeof m1, &len), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_server_handshake(&s, NULL, m1, sizeof m1, &len), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_server_handshake(&s, hello, NULL, sizeof m1, &len), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_server_handshake(&s, hello, m1, sizeof m1, NULL), NAION_CSM_ERR_INVALID_ARGUMENT);
+
+    /* client_finish NULLs */
+    CHECK_CSM(naion_csm_sess_client_finish(NULL, m1, sizeof m1), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_client_finish(&c, NULL, sizeof m1), NAION_CSM_ERR_INVALID_ARGUMENT);
+
+    /* encrypt/decrypt NULLs */
+    CHECK_CSM(naion_csm_sess_client_encrypt(NULL, pt, 32, buf, sizeof buf, &len), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_client_encrypt(&c, pt, 32, NULL, sizeof buf, &len), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_client_encrypt(&c, pt, 32, buf, sizeof buf, NULL), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_client_decrypt(NULL, buf, 32, buf, sizeof buf, &len), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_client_decrypt(&c, NULL, 32, buf, sizeof buf, &len), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_client_decrypt(&c, buf, 32, NULL, sizeof buf, &len), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_client_decrypt(&c, buf, 32, buf, sizeof buf, NULL), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_server_encrypt(NULL, pt, 32, buf, sizeof buf, &len), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_server_encrypt(&s, pt, 32, NULL, sizeof buf, &len), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_server_encrypt(&s, pt, 32, buf, sizeof buf, NULL), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_server_decrypt(NULL, buf, 32, buf, sizeof buf, &len), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_server_decrypt(&s, NULL, 32, buf, sizeof buf, &len), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_server_decrypt(&s, buf, 32, NULL, sizeof buf, &len), NAION_CSM_ERR_INVALID_ARGUMENT);
+    CHECK_CSM(naion_csm_sess_server_decrypt(&s, buf, 32, buf, sizeof buf, NULL), NAION_CSM_ERR_INVALID_ARGUMENT);
+    TEST_END();
+}
+
+#endif /* NAION_LAYER_CSM_SESSION */
+
+/* ========================================================================= */
 /* Section 5 — NAION_XSALSA20 (optional)                                      */
 /* ========================================================================= */
 #if NAION_XSALSA20
@@ -4055,6 +4463,23 @@ int main(int argc, char **argv)
     RUN(test_csm_ca_wipe);
     RUN(test_csm_ca_tamper);
     RUN(test_csm_ca_null_errors);
+#endif
+
+#if NAION_LAYER_CSM_SESSION
+    /* ---- Section 4C ---- */
+    RUN(test_csm_sess_client_create);
+    RUN(test_csm_sess_server_create);
+    RUN(test_csm_sess_constants);
+    RUN(test_csm_sess_client_hello);
+    RUN(test_csm_sess_handshake_flow);
+    RUN(test_csm_sess_server_handshake_reject);
+    RUN(test_csm_sess_client_finish_reject);
+    RUN(test_csm_sess_full_flow);
+    RUN(test_csm_sess_encrypt_before_handshake);
+    RUN(test_csm_sess_size_functions);
+    RUN(test_csm_sess_wipe);
+    RUN(test_csm_sess_tamper);
+    RUN(test_csm_sess_null_errors);
 #endif
 
 #if NAION_XSALSA20
