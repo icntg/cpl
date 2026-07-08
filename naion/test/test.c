@@ -1,3 +1,5 @@
+//go:build ignore
+
 /*
  * naion test harness — zero-dependency test for the naion single-header crypto
  * library. Implements the test plan in ../test01.md.

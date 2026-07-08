@@ -19,6 +19,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/big"
 
 	"hash"
 
@@ -1314,6 +1315,50 @@ func SignEd25519SKToPK(sk *[64]byte) [32]byte {
 // public key via the libsodium map u = (1+y)/(1-y) mod p.
 func SignEd25519PKToCurve25519(edPK *[32]byte) ([32]byte, error) {
 	return ed25519PKToCurve25519(edPK)
+}
+
+// reverseBytes reverses b in place (little-endian <-> big-endian byte order).
+func reverseBytes(b []byte) {
+	for i, j := 0, len(b)-1; i < j; i, j = i+1, j-1 {
+		b[i], b[j] = b[j], b[i]
+	}
+}
+
+// ed25519PKToCurve25519 converts an Ed25519 public key to a Curve25519 public
+// key via the libsodium map u = (1+y)/(1-y) mod p (RFC 7748 / libsodium
+// crypto_sign_ed25519_pk_to_curve25519): recover the Edwards y-coordinate from
+// the Ed25519 public-key encoding and map it to the Montgomery u-coordinate
+// used by X25519.
+func ed25519PKToCurve25519(edPK *[32]byte) ([32]byte, error) {
+	const pHex = "7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed"
+	p, ok := new(big.Int).SetString(pHex, 16)
+	if !ok {
+		return [32]byte{}, errors.New("naion: invalid curve25519 prime")
+	}
+
+	var yBytes [32]byte
+	copy(yBytes[:], edPK[:])
+	yBytes[31] &= 0x7f
+	reverseBytes(yBytes[:])
+	y := new(big.Int).SetBytes(yBytes[:])
+	if y.Cmp(p) >= 0 {
+		return [32]byte{}, errors.New("naion: invalid Ed25519 public key")
+	}
+
+	one := big.NewInt(1)
+	num := new(big.Int).Mod(new(big.Int).Add(one, y), p)
+	den := new(big.Int).Mod(new(big.Int).Sub(one, y), p)
+	inv := new(big.Int).ModInverse(den, p)
+	if inv == nil {
+		return [32]byte{}, errors.New("naion: invalid Ed25519 public key")
+	}
+	u := new(big.Int).Mod(new(big.Int).Mul(num, inv), p)
+
+	var out [32]byte
+	be := u.Bytes()
+	copy(out[32-len(be):], be)
+	reverseBytes(out[:])
+	return out, nil
 }
 
 // SignEd25519SKToCurve25519: X sk = clamp(SHA512(ed_seed)[0:32]).

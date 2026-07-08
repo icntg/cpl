@@ -25,6 +25,17 @@ func mustHex(t testing.TB, text string) []byte {
 	return out
 }
 
+func seed32(t testing.TB, hexStr string) [32]byte {
+	t.Helper()
+	raw := mustHex(t, hexStr)
+	if len(raw) != 32 {
+		t.Fatalf("seed must be 32 bytes, got %d", len(raw))
+	}
+	var s [32]byte
+	copy(s[:], raw)
+	return s
+}
+
 func testPayload(size int) []byte {
 	out := make([]byte, size)
 	for i := range out {
@@ -33,27 +44,30 @@ func testPayload(size int) []byte {
 	return out
 }
 
-func newPair(t testing.TB) (*naion.Client, *naion.Server) {
+func newPair(t testing.TB) (*naion.CSMClient, *naion.CSMServer) {
 	t.Helper()
-	server, err := naion.NewServer(mustHex(t, testServerSeedHex))
-	if err != nil {
-		t.Fatalf("NewServer failed: %v", err)
+	ss := seed32(t, testServerSeedHex)
+	server, rc := naion.CSMServerCreate(&ss)
+	if rc != naion.CSMOK {
+		t.Fatalf("CSMServerCreate failed: %v", rc)
 	}
-	client, err := naion.NewClient(mustHex(t, testClientSeedHex), server.EdPublicKey())
-	if err != nil {
-		t.Fatalf("NewClient failed: %v", err)
+	cs := seed32(t, testClientSeedHex)
+	spk := server.EdPublicKey
+	client, rc := naion.CSMClientCreate(&cs, &spk)
+	if rc != naion.CSMOK {
+		t.Fatalf("CSMClientCreate failed: %v", rc)
 	}
 	return client, server
 }
 
-func bootstrapServer(t testing.TB, client *naion.Client, server *naion.Server) {
+func bootstrapServer(t testing.TB, client *naion.CSMClient, server *naion.CSMServer) {
 	t.Helper()
-	packet, err := client.Encrypt([]byte("bootstrap"))
-	if err != nil {
-		t.Fatalf("bootstrap client encrypt failed: %v", err)
+	packet, rc := client.Encrypt([]byte("bootstrap"))
+	if rc != naion.CSMOK {
+		t.Fatalf("bootstrap client encrypt failed: %v", rc)
 	}
-	if _, err := server.Decrypt(packet); err != nil {
-		t.Fatalf("bootstrap server decrypt failed: %v", err)
+	if _, rc := server.Decrypt(packet); rc != naion.CSMOK {
+		t.Fatalf("bootstrap server decrypt failed: %v", rc)
 	}
 }
 
@@ -64,13 +78,13 @@ func TestGoLocalRoundTripSizes(t *testing.T) {
 			payload := testPayload(size)
 			client, server := newPair(t)
 
-			clientPacket, err := client.Encrypt(payload)
-			if err != nil {
-				t.Fatalf("client encrypt failed: %v", err)
+			clientPacket, rc := client.Encrypt(payload)
+			if rc != naion.CSMOK {
+				t.Fatalf("client encrypt failed: %v", rc)
 			}
-			serverPlain, err := server.Decrypt(clientPacket)
-			if err != nil {
-				t.Fatalf("server decrypt failed: %v", err)
+			serverPlain, rc := server.Decrypt(clientPacket)
+			if rc != naion.CSMOK {
+				t.Fatalf("server decrypt failed: %v", rc)
 			}
 			if !bytes.Equal(serverPlain, payload) {
 				t.Fatalf("client->server mismatch")
@@ -78,13 +92,13 @@ func TestGoLocalRoundTripSizes(t *testing.T) {
 
 			client, server = newPair(t)
 			bootstrapServer(t, client, server)
-			serverPacket, err := server.Encrypt(payload)
-			if err != nil {
-				t.Fatalf("server encrypt failed: %v", err)
+			serverPacket, rc := server.Encrypt(payload)
+			if rc != naion.CSMOK {
+				t.Fatalf("server encrypt failed: %v", rc)
 			}
-			clientPlain, err := client.Decrypt(serverPacket)
-			if err != nil {
-				t.Fatalf("client decrypt failed: %v", err)
+			clientPlain, rc := client.Decrypt(serverPacket)
+			if rc != naion.CSMOK {
+				t.Fatalf("client decrypt failed: %v", rc)
 			}
 			if !bytes.Equal(clientPlain, payload) {
 				t.Fatalf("server->client mismatch")
@@ -101,8 +115,8 @@ func BenchmarkGoClientEncrypt(b *testing.B) {
 			client, _ := newPair(b)
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				if _, err := client.Encrypt(payload); err != nil {
-					b.Fatalf("client encrypt failed: %v", err)
+				if _, rc := client.Encrypt(payload); rc != naion.CSMOK {
+					b.Fatalf("client encrypt failed: %v", rc)
 				}
 			}
 		})
@@ -115,15 +129,15 @@ func BenchmarkGoServerDecrypt(b *testing.B) {
 		b.Run(fmt.Sprintf("size_%d", size), func(b *testing.B) {
 			payload := testPayload(size)
 			client, _ := newPair(b)
-			packet, err := client.Encrypt(payload)
-			if err != nil {
-				b.Fatalf("prepare client packet failed: %v", err)
+			packet, rc := client.Encrypt(payload)
+			if rc != naion.CSMOK {
+				b.Fatalf("prepare client packet failed: %v", rc)
 			}
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				_, server := newPair(b)
-				if _, err := server.Decrypt(packet); err != nil {
-					b.Fatalf("server decrypt failed: %v", err)
+				if _, rc := server.Decrypt(packet); rc != naion.CSMOK {
+					b.Fatalf("server decrypt failed: %v", rc)
 				}
 			}
 		})
@@ -139,8 +153,8 @@ func BenchmarkGoServerEncrypt(b *testing.B) {
 			bootstrapServer(b, client, server)
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				if _, err := server.Encrypt(payload); err != nil {
-					b.Fatalf("server encrypt failed: %v", err)
+				if _, rc := server.Encrypt(payload); rc != naion.CSMOK {
+					b.Fatalf("server encrypt failed: %v", rc)
 				}
 			}
 		})
@@ -154,14 +168,14 @@ func BenchmarkGoClientDecrypt(b *testing.B) {
 			payload := testPayload(size)
 			client, server := newPair(b)
 			bootstrapServer(b, client, server)
-			packet, err := server.Encrypt(payload)
-			if err != nil {
-				b.Fatalf("prepare server packet failed: %v", err)
+			packet, rc := server.Encrypt(payload)
+			if rc != naion.CSMOK {
+				b.Fatalf("prepare server packet failed: %v", rc)
 			}
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				if _, err := client.Decrypt(packet); err != nil {
-					b.Fatalf("client decrypt failed: %v", err)
+				if _, rc := client.Decrypt(packet); rc != naion.CSMOK {
+					b.Fatalf("client decrypt failed: %v", rc)
 				}
 			}
 		})

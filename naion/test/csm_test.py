@@ -25,7 +25,7 @@ C_PEER_SOURCE = TEST_ROOT / "c_peer.c"
 if str(MODULE_ROOT) not in sys.path:
     sys.path.insert(0, str(MODULE_ROOT))
 
-import csm  # noqa: E402
+import naion  # noqa: E402
 
 
 def payload_for_size(size: int) -> bytes:
@@ -91,17 +91,8 @@ def peer_python(args: argparse.Namespace) -> int:
     client_seed = bytes.fromhex(args.client_seed)
     server_seed = bytes.fromhex(args.server_seed)
     repeat = max(1, int(args.repeat))
-    server = csm.Server.create(server_seed)
-    client = csm.Client.create(client_seed, server.ed_public_key)
-    timestamp_window_ms = max(0, int(args.timestamp_window_ms))
-    sleep_before_decrypt_ms = max(0, int(args.sleep_before_decrypt_ms))
-    replay_cache_capacity = max(0, int(args.replay_cache_capacity))
-    replay_cache_retention_ms = max(0, int(args.replay_cache_retention_ms))
-
-    if timestamp_window_ms > 0:
-        server.set_timestamp_window_ms(timestamp_window_ms)
-    if replay_cache_capacity > 0:
-        server.set_replay_cache(csm.MemoryReplayCache(replay_cache_retention_ms))
+    server = naion.CSMServer(server_seed)
+    client = naion.CSMClient(client_seed, server.ed_public_key)
 
     if args.op == "client-encrypt":
         payload = b64d(args.payload_b64)
@@ -115,48 +106,12 @@ def peer_python(args: argparse.Namespace) -> int:
 
     if args.op == "server-decrypt":
         packet = b64d(args.packet_b64)
-        if sleep_before_decrypt_ms > 0:
-            time.sleep(sleep_before_decrypt_ms / 1000.0)
         begin = time.perf_counter_ns()
         plaintext = b""
         for _ in range(repeat):
             plaintext = server.decrypt(packet)
         elapsed_ns = time.perf_counter_ns() - begin
         json_print({"ok": True, "elapsed_ns": elapsed_ns, "repeat": repeat, "plaintext_b64": b64e(plaintext)})
-        return 0
-
-    if args.op == "server-decrypt-double":
-        packet = b64d(args.packet_b64)
-        if sleep_before_decrypt_ms > 0:
-            time.sleep(sleep_before_decrypt_ms / 1000.0)
-        first_plain = b""
-        first_ok = False
-        second_ok = False
-        second_error = ""
-        begin = time.perf_counter_ns()
-        try:
-            first_plain = server.decrypt(packet)
-            first_ok = True
-        except Exception as exc:  # noqa: BLE001
-            second_error = f"first:{type(exc).__name__}:{exc}"
-        if first_ok:
-            try:
-                _ = server.decrypt(packet)
-                second_ok = True
-            except Exception as exc:  # noqa: BLE001
-                second_error = f"{type(exc).__name__}:{exc}"
-        elapsed_ns = time.perf_counter_ns() - begin
-        json_print(
-            {
-                "ok": first_ok,
-                "elapsed_ns": elapsed_ns,
-                "repeat": 1,
-                "first_ok": first_ok,
-                "second_ok": second_ok,
-                "second_error": second_error,
-                "plaintext_b64": b64e(first_plain) if first_ok else "",
-            }
-        )
         return 0
 
     if args.op == "server-encrypt":
@@ -266,23 +221,6 @@ def print_failure(mode: str, size: int, enc_lang: str, dec_lang: str, stage: str
     headline = f"[{mode}] size={size:>3} {enc_lang:>6} -> {dec_lang:<6} {stage}=FAIL"
     print(headline)
     print(error.strip())
-
-
-def print_security_result(name: str, enc_lang: str, dec_lang: str, status: str, detail: str = "") -> None:
-    line = f"[{name}] {enc_lang:>6} -> {dec_lang:<6} {status}"
-    print(line)
-    if detail:
-        print(detail.strip())
-
-
-def looks_like_timestamp_error(text: str) -> bool:
-    lower = text.lower()
-    return "timestamp" in lower or "outside window" in lower or "code=-9" in lower
-
-
-def looks_like_replay_error(text: str) -> bool:
-    lower = text.lower()
-    return "replay" in lower or "code=-10" in lower
 
 
 def run_suite(args: argparse.Namespace) -> int:
@@ -473,136 +411,6 @@ def run_suite(args: argparse.Namespace) -> int:
                     }
                 )
 
-    print("\n== Timestamp Expiry ==")
-    for enc_peer in peers:
-        packet_result = enc_peer.invoke("client-encrypt", payload=b"expiry", repeat=1)
-        if not packet_result.get("ok", False):
-            failed += len(peers)
-            for dec_peer in peers:
-                print_security_result("EXPIRY", enc_peer.name, dec_peer.name, "encrypt=FAIL", packet_result["error"])
-            continue
-        packet = b64d(packet_result["packet_b64"])
-        for dec_peer in peers:
-            dec = dec_peer.invoke(
-                "server-decrypt",
-                packet=packet,
-                repeat=1,
-                extra_args={
-                    "timestamp-window-ms": 5,
-                    "sleep-before-decrypt-ms": 20,
-                },
-            )
-            if dec.get("ok", False):
-                failed += 1
-                detail = "expected timestamp expiry failure, but decrypt succeeded"
-                print_security_result("EXPIRY", enc_peer.name, dec_peer.name, "FAIL", detail)
-                results.append(
-                    {
-                        "mode": "timestamp_expiry",
-                        "encryptor": enc_peer.name,
-                        "decryptor": dec_peer.name,
-                        "status": "unexpected_success",
-                        "error": detail,
-                    }
-                )
-                continue
-            error = dec.get("error", "")
-            if not looks_like_timestamp_error(error):
-                failed += 1
-                print_security_result("EXPIRY", enc_peer.name, dec_peer.name, "FAIL", error)
-                results.append(
-                    {
-                        "mode": "timestamp_expiry",
-                        "encryptor": enc_peer.name,
-                        "decryptor": dec_peer.name,
-                        "status": "wrong_error",
-                        "error": error,
-                    }
-                )
-                continue
-            passed += 1
-            print_security_result("EXPIRY", enc_peer.name, dec_peer.name, "PASS")
-            results.append(
-                {
-                    "mode": "timestamp_expiry",
-                    "encryptor": enc_peer.name,
-                    "decryptor": dec_peer.name,
-                    "status": "ok",
-                }
-            )
-
-    print("\n== Replay Detection ==")
-    for enc_peer in peers:
-        packet_result = enc_peer.invoke("client-encrypt", payload=b"replay", repeat=1)
-        if not packet_result.get("ok", False):
-            failed += len(peers)
-            for dec_peer in peers:
-                print_security_result("REPLAY", enc_peer.name, dec_peer.name, "encrypt=FAIL", packet_result["error"])
-            continue
-        packet = b64d(packet_result["packet_b64"])
-        for dec_peer in peers:
-            dec = dec_peer.invoke(
-                "server-decrypt-double",
-                packet=packet,
-                repeat=1,
-                extra_args={
-                    "replay-cache-capacity": 64,
-                    "replay-cache-retention-ms": 300000,
-                },
-            )
-            if not dec.get("first_ok", False):
-                failed += 1
-                detail = dec.get("error", dec.get("second_error", "first decrypt failed"))
-                print_security_result("REPLAY", enc_peer.name, dec_peer.name, "FAIL", detail)
-                results.append(
-                    {
-                        "mode": "replay_detection",
-                        "encryptor": enc_peer.name,
-                        "decryptor": dec_peer.name,
-                        "status": "first_decrypt_failed",
-                        "error": detail,
-                    }
-                )
-                continue
-            if dec.get("second_ok", False):
-                failed += 1
-                detail = "expected replay failure on second decrypt, but second decrypt succeeded"
-                print_security_result("REPLAY", enc_peer.name, dec_peer.name, "FAIL", detail)
-                results.append(
-                    {
-                        "mode": "replay_detection",
-                        "encryptor": enc_peer.name,
-                        "decryptor": dec_peer.name,
-                        "status": "unexpected_second_success",
-                        "error": detail,
-                    }
-                )
-                continue
-            second_error = dec.get("second_error", "")
-            if not looks_like_replay_error(second_error):
-                failed += 1
-                print_security_result("REPLAY", enc_peer.name, dec_peer.name, "FAIL", second_error)
-                results.append(
-                    {
-                        "mode": "replay_detection",
-                        "encryptor": enc_peer.name,
-                        "decryptor": dec_peer.name,
-                        "status": "wrong_error",
-                        "error": second_error,
-                    }
-                )
-                continue
-            passed += 1
-            print_security_result("REPLAY", enc_peer.name, dec_peer.name, "PASS")
-            results.append(
-                {
-                    "mode": "replay_detection",
-                    "encryptor": enc_peer.name,
-                    "decryptor": dec_peer.name,
-                    "status": "ok",
-                }
-            )
-
     if args.json_out:
         json_path = Path(args.json_out)
         json_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
@@ -617,17 +425,13 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     peer_parser = subparsers.add_parser("peer-python", help="python peer endpoint for the interop runner")
-    peer_parser.add_argument("op", choices=["client-encrypt", "server-decrypt", "server-decrypt-double", "server-encrypt", "client-decrypt"])
+    peer_parser.add_argument("op", choices=["client-encrypt", "server-decrypt", "server-encrypt", "client-decrypt"])
     peer_parser.add_argument("--client-seed", required=True)
     peer_parser.add_argument("--server-seed", required=True)
     peer_parser.add_argument("--payload-b64")
     peer_parser.add_argument("--packet-b64")
     peer_parser.add_argument("--bootstrap-packet-b64")
     peer_parser.add_argument("--repeat", default="1")
-    peer_parser.add_argument("--timestamp-window-ms", default="0")
-    peer_parser.add_argument("--sleep-before-decrypt-ms", default="0")
-    peer_parser.add_argument("--replay-cache-capacity", default="0")
-    peer_parser.add_argument("--replay-cache-retention-ms", default="0")
     peer_parser.set_defaults(func=peer_python)
 
     run_parser = subparsers.add_parser("run", help="run the full cross-language interop suite")

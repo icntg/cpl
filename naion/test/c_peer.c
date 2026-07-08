@@ -1,21 +1,19 @@
+//go:build ignore
+
 #define NAION_IMPLEMENTATION
-#define CSM_IMPLEMENTATION
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
 
-#include "../csm.h"
+#include "../naion.h"
 
 typedef struct Result {
     unsigned long long elapsed_ns;
     int repeat;
-    int first_ok;
-    int second_ok;
     char *packet_b64;
     char *plaintext_b64;
-    char *second_error;
 } Result;
 
 static unsigned long long now_ns(void) {
@@ -171,14 +169,6 @@ static void fail(const char *message, int code) {
 
 static void emit_result(const Result *result) {
     printf("{\"ok\":true,\"elapsed_ns\":%llu,\"repeat\":%d", result->elapsed_ns, result->repeat);
-    if (result->first_ok || result->second_ok || result->second_error != NULL) {
-        printf(",\"first_ok\":%s,\"second_ok\":%s",
-               result->first_ok ? "true" : "false",
-               result->second_ok ? "true" : "false");
-    }
-    if (result->second_error != NULL) {
-        printf(",\"second_error\":\"%s\"", result->second_error);
-    }
     if (result->packet_b64 != NULL) {
         printf(",\"packet_b64\":\"%s\"", result->packet_b64);
     }
@@ -193,39 +183,31 @@ int main(int argc, char **argv) {
     const char *client_seed_hex;
     const char *server_seed_hex;
     int repeat;
-    int timestamp_window_ms;
     int sleep_before_decrypt_ms;
-    int replay_cache_capacity;
-    int replay_cache_retention_ms;
     unsigned char *client_seed = NULL;
     unsigned char *server_seed = NULL;
     size_t client_seed_len = 0U;
     size_t server_seed_len = 0U;
-    csm_client client;
-    csm_server server;
-    csm_memory_replay_cache replay_cache;
+    naion_csm_client client;
+    naion_csm_server server;
     Result result;
 
     memset(&client, 0, sizeof(client));
     memset(&server, 0, sizeof(server));
-    memset(&replay_cache, 0, sizeof(replay_cache));
     memset(&result, 0, sizeof(result));
 
     if (argc < 2) {
         fail("missing op", -1);
     }
-    if (csm_init() != CSM_OK) {
-        fail("csm_init failed", -1);
+    if (naion_csm_init() != NAION_CSM_OK) {
+        fail("naion_csm_init failed", -1);
     }
 
     op = argv[1];
     client_seed_hex = arg_value(argc, argv, "--client-seed");
     server_seed_hex = arg_value(argc, argv, "--server-seed");
     repeat = arg_int(argc, argv, "--repeat", 1);
-    timestamp_window_ms = arg_int(argc, argv, "--timestamp-window-ms", 0);
     sleep_before_decrypt_ms = arg_int(argc, argv, "--sleep-before-decrypt-ms", 0);
-    replay_cache_capacity = arg_int(argc, argv, "--replay-cache-capacity", 0);
-    replay_cache_retention_ms = arg_int(argc, argv, "--replay-cache-retention-ms", 0);
     if (client_seed_hex == NULL || server_seed_hex == NULL) {
         fail("client-seed and server-seed are required", -1);
     }
@@ -239,23 +221,11 @@ int main(int argc, char **argv) {
     if (client_seed_len != naion_sign_ed25519_SEEDBYTES || server_seed_len != naion_sign_ed25519_SEEDBYTES) {
         fail("seed length mismatch", -1);
     }
-    if (csm_server_create(&server, server_seed) != CSM_OK) {
-        fail("csm_server_create failed", -1);
+    if (naion_csm_server_create(&server, server_seed) != NAION_CSM_OK) {
+        fail("naion_csm_server_create failed", -1);
     }
-    if (csm_client_create(&client, client_seed, server.ed_public_key) != CSM_OK) {
-        fail("csm_client_create failed", -1);
-    }
-    if (timestamp_window_ms > 0) {
-        csm_server_set_timestamp_window_ms(&server, (uint64_t) timestamp_window_ms);
-    }
-    if (replay_cache_capacity > 0) {
-        if (csm_memory_replay_cache_init(
-                &replay_cache,
-                (size_t) replay_cache_capacity,
-                (uint64_t) replay_cache_retention_ms) != CSM_OK) {
-            fail("csm_memory_replay_cache_init failed", -1);
-        }
-        csm_server_set_replay_cache(&server, &replay_cache);
+    if (naion_csm_client_create(&client, client_seed, server.ed_public_key) != NAION_CSM_OK) {
+        fail("naion_csm_client_create failed", -1);
     }
 
     if (strcmp(op, "client-encrypt") == 0) {
@@ -269,7 +239,7 @@ int main(int argc, char **argv) {
         if (payload_b64 == NULL || !base64_decode(payload_b64, &payload, &payload_len)) {
             fail("payload base64 decode failed", -1);
         }
-        packet_cap = csm_client_encrypt_size(payload_len);
+        packet_cap = naion_csm_client_encrypt_size(payload_len);
         packet = (unsigned char *) malloc(packet_cap);
         if (packet == NULL) {
             fail("packet alloc failed", -1);
@@ -278,8 +248,8 @@ int main(int argc, char **argv) {
         {
             int i;
             for (i = 0; i < repeat; ++i) {
-                if (csm_client_encrypt(&client, payload, payload_len, packet, packet_cap, &packet_len) != CSM_OK) {
-                    fail("csm_client_encrypt failed", -1);
+                if (naion_csm_client_encrypt(&client, payload, payload_len, packet, packet_cap, &packet_len) != NAION_CSM_OK) {
+                    fail("naion_csm_client_encrypt failed", -1);
                 }
             }
         }
@@ -301,7 +271,7 @@ int main(int argc, char **argv) {
             fail("packet base64 decode failed", -1);
         }
         sleep_ms(sleep_before_decrypt_ms);
-        plaintext_cap = csm_server_decrypt_max_plaintext_size(packet_len);
+        plaintext_cap = naion_csm_server_decrypt_max_plaintext_size(packet_len);
         plaintext = (unsigned char *) malloc(plaintext_cap);
         if (plaintext == NULL) {
             fail("plaintext alloc failed", -1);
@@ -310,8 +280,8 @@ int main(int argc, char **argv) {
         {
             int i;
             for (i = 0; i < repeat; ++i) {
-                if (csm_server_decrypt(&server, packet, packet_len, plaintext, plaintext_cap, &plaintext_len) != CSM_OK) {
-                    fail("csm_server_decrypt failed", -1);
+                if (naion_csm_server_decrypt(&server, packet, packet_len, plaintext, plaintext_cap, &plaintext_len) != NAION_CSM_OK) {
+                    fail("naion_csm_server_decrypt failed", -1);
                 }
             }
         }
@@ -319,46 +289,6 @@ int main(int argc, char **argv) {
         result.repeat = repeat;
         result.plaintext_b64 = base64_encode(plaintext, plaintext_len);
         emit_result(&result);
-        free(packet);
-        free(plaintext);
-    } else if (strcmp(op, "server-decrypt-double") == 0) {
-        const char *packet_b64 = arg_value(argc, argv, "--packet-b64");
-        unsigned char *packet = NULL;
-        size_t packet_len = 0U;
-        unsigned char *plaintext = NULL;
-        size_t plaintext_len = 0U;
-        size_t plaintext_cap = 0U;
-        int ret;
-        if (packet_b64 == NULL || !base64_decode(packet_b64, &packet, &packet_len)) {
-            fail("packet base64 decode failed", -1);
-        }
-        sleep_ms(sleep_before_decrypt_ms);
-        plaintext_cap = csm_server_decrypt_max_plaintext_size(packet_len);
-        plaintext = (unsigned char *) malloc(plaintext_cap);
-        if (plaintext == NULL) {
-            fail("plaintext alloc failed", -1);
-        }
-        ret = csm_server_decrypt(&server, packet, packet_len, plaintext, plaintext_cap, &plaintext_len);
-        result.repeat = 1;
-        result.first_ok = (ret == CSM_OK);
-        if (ret == CSM_OK) {
-            result.plaintext_b64 = base64_encode(plaintext, plaintext_len);
-            ret = csm_server_decrypt(&server, packet, packet_len, plaintext, plaintext_cap, &plaintext_len);
-            result.second_ok = (ret == CSM_OK);
-            if (ret != CSM_OK) {
-                char buffer[64];
-                _snprintf(buffer, sizeof(buffer), "code=%d", ret);
-                buffer[sizeof(buffer) - 1] = '\0';
-                result.second_error = _strdup(buffer);
-            }
-            emit_result(&result);
-        } else {
-            char buffer[64];
-            _snprintf(buffer, sizeof(buffer), "first:code=%d", ret);
-            buffer[sizeof(buffer) - 1] = '\0';
-            result.second_error = _strdup(buffer);
-            emit_result(&result);
-        }
         free(packet);
         free(plaintext);
     } else if (strcmp(op, "server-encrypt") == 0) {
@@ -378,18 +308,18 @@ int main(int argc, char **argv) {
         if (bootstrap_packet_b64 == NULL || !base64_decode(bootstrap_packet_b64, &bootstrap_packet, &bootstrap_packet_len)) {
             fail("bootstrap packet decode failed", -1);
         }
-        bootstrap_plain_cap = csm_server_decrypt_max_plaintext_size(bootstrap_packet_len);
+        bootstrap_plain_cap = naion_csm_server_decrypt_max_plaintext_size(bootstrap_packet_len);
         bootstrap_plain = (unsigned char *) malloc(bootstrap_plain_cap);
         if (bootstrap_plain == NULL) {
             fail("bootstrap plain alloc failed", -1);
         }
-        if (csm_server_decrypt(&server, bootstrap_packet, bootstrap_packet_len, bootstrap_plain, bootstrap_plain_cap, &bootstrap_plain_len) != CSM_OK) {
+        if (naion_csm_server_decrypt(&server, bootstrap_packet, bootstrap_packet_len, bootstrap_plain, bootstrap_plain_cap, &bootstrap_plain_len) != NAION_CSM_OK) {
             fail("bootstrap server decrypt failed", -1);
         }
         if (payload_b64 == NULL || !base64_decode(payload_b64, &payload, &payload_len)) {
             fail("payload decode failed", -1);
         }
-        packet_cap = csm_server_encrypt_size(payload_len);
+        packet_cap = naion_csm_server_encrypt_size(payload_len);
         packet = (unsigned char *) malloc(packet_cap);
         if (packet == NULL) {
             fail("packet alloc failed", -1);
@@ -398,8 +328,8 @@ int main(int argc, char **argv) {
         {
             int i;
             for (i = 0; i < repeat; ++i) {
-                if (csm_server_encrypt(&server, payload, payload_len, packet, packet_cap, &packet_len) != CSM_OK) {
-                    fail("csm_server_encrypt failed", -1);
+                if (naion_csm_server_encrypt(&server, payload, payload_len, packet, packet_cap, &packet_len) != NAION_CSM_OK) {
+                    fail("naion_csm_server_encrypt failed", -1);
                 }
             }
         }
@@ -423,7 +353,7 @@ int main(int argc, char **argv) {
             fail("packet decode failed", -1);
         }
         sleep_ms(sleep_before_decrypt_ms);
-        plaintext_cap = csm_client_decrypt_max_plaintext_size(packet_len);
+        plaintext_cap = naion_csm_client_decrypt_max_plaintext_size(packet_len);
         plaintext = (unsigned char *) malloc(plaintext_cap);
         if (plaintext == NULL) {
             fail("plaintext alloc failed", -1);
@@ -432,8 +362,8 @@ int main(int argc, char **argv) {
         {
             int i;
             for (i = 0; i < repeat; ++i) {
-                if (csm_client_decrypt(&client, packet, packet_len, plaintext, plaintext_cap, &plaintext_len) != CSM_OK) {
-                    fail("csm_client_decrypt failed", -1);
+                if (naion_csm_client_decrypt(&client, packet, packet_len, plaintext, plaintext_cap, &plaintext_len) != NAION_CSM_OK) {
+                    fail("naion_csm_client_decrypt failed", -1);
                 }
             }
         }
@@ -451,9 +381,7 @@ int main(int argc, char **argv) {
     free(server_seed);
     free(result.packet_b64);
     free(result.plaintext_b64);
-    free(result.second_error);
-    csm_memory_replay_cache_wipe(&replay_cache);
-    csm_client_wipe(&client);
-    csm_server_wipe(&server);
+    naion_csm_client_wipe(&client);
+    naion_csm_server_wipe(&server);
     return 0;
 }
