@@ -15,6 +15,16 @@
 #include "../base.hpp"
 #include "../strings.hpp"
 
+// Cross-compiler attribute shim: api_gen.py emits the MSVC-specific __kernel_entry
+// calling-convention annotation. No-op it on non-MSVC toolchains (MinGW gcc).
+// (__in/__out are reserved for the implementation and must not be macro-defined;
+// sys.hpp uses the _In_/_Out_ flavour which base.hpp already no-ops.)
+#ifndef _MSC_VER
+#ifndef __kernel_entry
+#define __kernel_entry
+#endif
+#endif
+
 #ifndef ERROR_API_UNAVAILABLE
 #define ERROR_API_UNAVAILABLE           15841L
 #endif
@@ -65,7 +75,7 @@ namespace cpl {
                     if (!rHex) {
                         return Err(rHex.error().Append(CPL_FILE_AND_LINE));
                     }
-                    const auto h = rHex.value<>();
+                    const auto h = rHex.value();
                     auto es = strings::Format(
                         "[X] convert WideChar [%s] to MultiByte failed [%u][...] CPL_FILE_AND_LINE",
                         h.data(),
@@ -75,7 +85,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Errors::WideCharToMultiByte, es.value<>());
+                    return MakeErr(Errors::WideCharToMultiByte, es.value());
                 }
                 return std::string{buffer.begin(), buffer.end()};
             }
@@ -100,7 +110,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Errors::MultiByteToWideChar, es.value<>());
+                    return MakeErr(Errors::MultiByteToWideChar, es.value());
                 }
                 return std::wstring{buffer.begin(), buffer.end()};
             }
@@ -151,7 +161,7 @@ namespace cpl {
                         if (!es) {
                             return Err(es.error().Append(CPL_FILE_AND_LINE));
                         }
-                        LOG_D("%s\n", es.value<>().data());
+                        LOG_D("%s\n", es.value().data());
                         return ERROR_ALREADY_EXISTS;
                     }
                     auto upperDllName = this->szDllName;
@@ -168,8 +178,8 @@ namespace cpl {
                             if (!es) {
                                 return Err(es.error().Append(CPL_FILE_AND_LINE));
                             }
-                            LOG_D("%s\n", es.value<>().data());
-                            return MakeErr(Error::UnavailableAPI, es.value<>());
+                            LOG_D("%s\n", es.value().data());
+                            return MakeErr(Error::UnavailableAPI, es.value());
                         }
                         this->hModule = hMod;
                         auto es = cpl::strings::Format("[#] module [%s] is loaded already" CPL_FILE_AND_LINE,
@@ -177,7 +187,7 @@ namespace cpl {
                         if (!es) {
                             return Err(es.error().Append(CPL_FILE_AND_LINE));
                         }
-                        LOG_D("%s\n", es.value<>().data());
+                        LOG_D("%s\n", es.value().data());
                         return ERROR_ALREADY_EXISTS;
                     }
                     this->hModule = LoadLibraryA(this->szDllName.data());
@@ -191,9 +201,9 @@ namespace cpl {
                         if (!es) {
                             return Err(es.error().Append(CPL_FILE_AND_LINE));
                         }
-                        LOG_D("%s\n", es.value<>().data());
+                        LOG_D("%s\n", es.value().data());
                         if (this->bModuleNecessary) {
-                            return MakeErr(Errors::LoadLibraryA, es.value<>());
+                            return MakeErr(Errors::LoadLibraryA, es.value());
                         }
                         return ERROR_INSTALL_FAILED;
                     }
@@ -215,8 +225,8 @@ namespace cpl {
                             if (!es) {
                                 return Err(es.error().Append(CPL_FILE_AND_LINE));
                             }
-                            LOG_D("%s\n", es.value<>().data());
-                            return MakeErr(Errors::FreeLibrary_, es.value<>());
+                            LOG_D("%s\n", es.value().data());
+                            return MakeErr(Errors::FreeLibrary_, es.value());
                         }
                         hModule = nullptr;
                     }
@@ -257,8 +267,8 @@ namespace cpl {
                 //                 if (!es) {
                 //                     return Err(es.error().Append(CPL_FILE_AND_LINE));
                 //                 }
-                //                 LOG_D("%s\n", es.value<>().data());
-                //                 return MakeErr(e, es.value<>());
+                //                 LOG_D("%s\n", es.value().data());
+                //                 return MakeErr(e, es.value());
                 //             }
                 //             auto es = cpl::strings::Format(
                 //                 "[#] function [%s] of [%s] at [0x%p] is loaded already"
@@ -270,7 +280,7 @@ namespace cpl {
                 //             if (!es) {
                 //                 return Err(es.error().Append(CPL_FILE_AND_LINE));
                 //             }
-                //             LOG_D("%s\n", es.value<>().data());
+                //             LOG_D("%s\n", es.value().data());
                 //             out = reinterpret_cast<FuncPtrType>(ptr);
                 //             return ERROR_ALREADY_EXISTS;
                 //         }
@@ -333,8 +343,8 @@ namespace cpl {
                                 if (!es) {
                                     return Err(es.error().Append(CPL_FILE_AND_LINE));
                                 }
-                                LOG_D("%s\n", es.value<>().data());
-                                return MakeErr(e, es.value<>());
+                                LOG_D("%s\n", es.value().data());
+                                return MakeErr(e, es.value());
                             }
                             auto es = cpl::strings::Format(
                                 "[#] function [%s] of [%s] at [0x%p] is loaded already"
@@ -346,7 +356,7 @@ namespace cpl {
                             if (!es) {
                                 return Err(es.error().Append(CPL_FILE_AND_LINE));
                             }
-                            LOG_D("%s\n", es.value<>().data());
+                            LOG_D("%s\n", es.value().data());
                             return reinterpret_cast<FuncPtrType>(ptr);
                         }
                     }
@@ -362,11 +372,11 @@ namespace cpl {
                         }
                         LOG_D("%s\n", es.value().data());
                         if (bFunctionNecessary) {
-                            return MakeErr(e, es.value<>());
+                            return MakeErr(e, es.value());
                         }
                         return nullptr; //
                     }
-                    FunctionMap()[upperModuleNameFunctionName] = ptr;
+                    FunctionMap()[upperModuleNameFunctionName] = reinterpret_cast<void *>(ptr);
                     auto es = cpl::strings::Format(
                         "[#] function [%s] of [%s] at [0x%p] is loaded",
                         functionName,
@@ -655,10 +665,10 @@ namespace cpl {
                 );
 
                 typedef BOOL (WINAPI*InternetCrackUrlA)(
-                    __in_ecount(dwUrlLength) LPCSTR lpszUrl,
-                    __in DWORD dwUrlLength,
-                    __in DWORD dwFlags,
-                    __inout LPURL_COMPONENTSA lpUrlComponents
+                    _In_ LPCSTR lpszUrl,
+                    _In_ DWORD dwUrlLength,
+                    _In_ DWORD dwFlags,
+                    _Inout_ LPURL_COMPONENTSA lpUrlComponents
                 );
             }
 
@@ -917,9 +927,9 @@ namespace cpl {
             va_end(args);
 
             if (r) {
-                OutputDebugStringA(r.value<>().data());
+                OutputDebugStringA(r.value().data());
                 if (base::log::exLoggerFunc) {
-                    base::log::exLoggerFunc(r.value<>());
+                    base::log::exLoggerFunc(r.value());
                 }
             } else {
                 std::string es{};
@@ -960,9 +970,9 @@ namespace cpl {
                 return Err(es.error().Append(CPL_FILE_AND_LINE));
             }
             if (loc) {
-                return Err(Error(code, (es.value<>() + loc).c_str()));
+                return Err(Error(code, (es.value() + loc).c_str()));
             }
-            return Err(Error(code, es.value<>().c_str()));
+            return Err(Error(code, es.value().c_str()));
         }
 
         inline Err APICallingError(const char *api, const char *location) {

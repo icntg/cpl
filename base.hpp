@@ -17,6 +17,8 @@
 #include <memory>
 #include <functional>
 #include <cerrno>
+#include <cstring>
+#include <ctime>
 #include <stdexcept>
 
 #include "vendor/TartanLlama/expected/expected.hpp"
@@ -47,12 +49,12 @@
 
 namespace cpl {
 
-    std::unique_ptr<bool> gDebug{};
+    inline std::unique_ptr<bool> gDebug{};
 
     // Minimal error dispatch model
     class Error {
     public:
-        using x32 = struct {
+        using X32 = struct {
             uint32_t h;
             uint32_t l;
         };
@@ -61,7 +63,7 @@ namespace cpl {
             int64_t i64;
             uint64_t u64;
 
-            x32 x32;
+            X32 x32;
 
             uint16_t u16[4];
             uint8_t u8[8];
@@ -285,7 +287,7 @@ namespace cpl {
 
         namespace log {
             // for LOG_D
-            void (*exLoggerFunc) (const std::string& out) = nullptr;
+            inline void (*exLoggerFunc) (const std::string& out) = nullptr;
 
             template<typename Callable>
             void once(Callable &&logFunc) {

@@ -69,7 +69,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Errors::CryptoBoxEasy, es.value<>());
+                    return MakeErr(Errors::CryptoBoxEasy, es.value());
                 }
                 std::memmove(encrypted.data(), nonce, sizeof(nonce));
                 return encrypted;
@@ -109,7 +109,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Errors::CryptoBoxOpenEasy, es.value<>());
+                    return MakeErr(Errors::CryptoBoxOpenEasy, es.value());
                 }
                 return plaintext;
             }
@@ -136,7 +136,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Errors::CryptoSignDetached, es.value<>());
+                    return MakeErr(Errors::CryptoSignDetached, es.value());
                 }
                 if (signature_len != crypto_sign_BYTES) {
                     return MakeErr(Errors::CryptoSignDetached,
@@ -195,7 +195,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Errors::CryptoSignSeedKeypair, es.value<>());
+                    return MakeErr(Errors::CryptoSignSeedKeypair, es.value());
                 }
 
                 return instance;
@@ -221,7 +221,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Errors::CryptoSignED25519PKtoCurve25519, es.value<>());
+                    return MakeErr(Errors::CryptoSignED25519PKtoCurve25519, es.value());
                 }
 
                 const auto r01 = crypto_box_keypair(spk.data(), ssk.data());
@@ -232,7 +232,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Errors::CryptoBoxKeypair, es.value<>());
+                    return MakeErr(Errors::CryptoBoxKeypair, es.value());
                 }
 
                 Stream payload;
@@ -290,7 +290,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Errors::CryptoSignED25519SKtoCurve25519, es.value<>());
+                    return MakeErr(Errors::CryptoSignED25519SKtoCurve25519, es.value());
                 }
 
                 XPK spk{};
@@ -330,7 +330,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Errors::CryptoSignSeedKeypair, es.value<>());
+                    return MakeErr(Errors::CryptoSignSeedKeypair, es.value());
                 }
                 return instance;
             }
@@ -360,7 +360,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Errors::CryptoSignED25519SKtoCurve25519, es.value<>());
+                    return MakeErr(Errors::CryptoSignED25519SKtoCurve25519, es.value());
                 }
 
                 XPK sessionX25519PK{};
@@ -423,7 +423,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Errors::CryptoSignED25519PKtoCurve25519, es.value<>());
+                    return MakeErr(Errors::CryptoSignED25519PKtoCurve25519, es.value());
                 }
 
                 XSK ssk{};
@@ -436,7 +436,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Errors::CryptoBoxKeypair, es.value<>());
+                    return MakeErr(Errors::CryptoBoxKeypair, es.value());
                 }
 
                 auto sealed = Utility::Seal(in, clientXpk, ssk);

@@ -25,6 +25,49 @@ using namespace cpl::strings;
 
 namespace cpl {
     namespace win32 {
+        // Bring the legacy Win32-native ISerializeJson into scope so the
+        // hand-written entity classes below can derive from it unqualified.
+        using cpl::base::ISerializeJson;
+
+        // Unwrap an Int32Result into a raw int32_t code for the Win32-native
+        // `retCode |= ...` idiom used throughout the hand-written part. A success
+        // value yields 0 (ERROR_SUCCESS); an error yields its int32_t payload.
+        inline int32_t RC(const cpl::Int32Result &r) {
+            return r ? r.value() : static_cast<int32_t>(r.error().Code.i64);
+        }
+
+        // Native string-returning shims. The hand-written cpl::win32 part below
+        // predates the Result<T> migration and expects Format/Hex/Unhex/Base64Encode
+        // to return std::string / int32_t directly (Win32-native call style).
+        // Defined in the enclosing cpl::win32 namespace so unqualified lookup
+        // prefers these over the top-level cpl::strings::Format (Result<string>).
+        inline string Format(const char *tpl, ...) {
+            va_list args;
+            va_start(args, tpl);
+            auto r = cpl::strings::VFormat(tpl, args);
+            va_end(args);
+            return r ? r.value() : string();
+        }
+
+        inline string Hex(const string &in) {
+            auto r = cpl::codec::Hex::Hexlify(
+                reinterpret_cast<const uint8_t *>(in.data()), in.size());
+            return r ? r.value() : string();
+        }
+
+        inline string Unhex(const string &hex) {
+            auto r = cpl::codec::Hex::UnHexlify(hex);
+            if (!r) { return string(); }
+            return string(r.value().begin(), r.value().end());
+        }
+
+        inline int32_t Base64Encode(_Out_ string &dst, _In_ const string &src) {
+            auto r = cpl::codec::Base64::Base64Encode(src.data(), src.size());
+            if (!r) { return -1; }
+            dst = std::move(r.value());
+            return 0;
+        }
+
         inline string FormatError(const DWORD errorCode) {
             static TCHAR buffer[BUFSIZ << 2u]{};
             memset(buffer, 0, sizeof(buffer));
@@ -66,7 +109,7 @@ namespace cpl {
                     return hModule != nullptr;
                 }
 
-                int32_t Load() override {
+                Int32Result Load() override {
                     INT32 retCode = ERROR_SUCCESS;
                     hModule = LoadLibrary(szDllName.data());
                     if (nullptr == hModule) {
@@ -84,7 +127,7 @@ namespace cpl {
                     return retCode;
                 }
 
-                int32_t Unload() override {
+                Int32Result Unload() override {
                     INT32 retCode = ERROR_SUCCESS;
                     if (nullptr != hModule) {
                         const BOOL bRet = FreeLibrary(hModule);
@@ -231,10 +274,10 @@ namespace cpl {
                     CryptHashData CryptHashData{};
                     CryptBinaryToStringA CryptBinaryToStringA{};
 
-                    int32_t Load() override {
+                    Int32Result Load() override {
                         INT32 retCode = ERROR_SUCCESS;
                         api::DynamicModule::szDllName = this->szDllName;
-                        retCode |= api::DynamicModule::Load();
+                        retCode |= RC(api::DynamicModule::Load());
                         PA(CryptGenRandom, wincrypt::CryptGenRandom, CryptGenRandom, this, false);
                         PA(CryptAcquireContextA, wincrypt::CryptAcquireContextA, CryptAcquireContextA, this, false);
                         PA(CryptReleaseContext, wincrypt::CryptReleaseContext, CryptReleaseContext, this, false);
@@ -256,7 +299,7 @@ namespace cpl {
                         return retCode;
                     }
 
-                    int32_t Unload() override {
+                    Int32Result Unload() override {
                         CryptGenRandom = nullptr;
                         CryptAcquireContextA = nullptr;
                         CryptReleaseContext = nullptr;
@@ -330,10 +373,10 @@ namespace cpl {
                     sendto sendto{};
                     closesocket closesocket{};
 
-                    int32_t Load() override {
+                    Int32Result Load() override {
                         INT32 retCode = ERROR_SUCCESS;
                         api::DynamicModule::szDllName = this->szDllName;
-                        retCode |= api::DynamicModule::Load();
+                        retCode |= RC(api::DynamicModule::Load());
 
                         PA(WSAStartup, ws32::WSAStartup, WSAStartup, this, true);
                         PA(WSACleanup, ws32::WSACleanup, WSACleanup, this, true);
@@ -351,7 +394,7 @@ namespace cpl {
                         return retCode;
                     }
 
-                    int32_t Unload() override {
+                    Int32Result Unload() override {
                         WSAStartup = nullptr;
                         WSACleanup = nullptr;
                         WSAGetLastError = nullptr;
@@ -426,10 +469,10 @@ namespace cpl {
                     InternetReadFile InternetReadFile{};
                     InternetCloseHandle InternetCloseHandle{};
 
-                    int32_t Load() override {
+                    Int32Result Load() override {
                         INT32 retCode = ERROR_SUCCESS;
                         api::DynamicModule::szDllName = this->szDllName;
-                        retCode |= api::DynamicModule::Load();
+                        retCode |= RC(api::DynamicModule::Load());
 
                         PA(InternetOpenA, inet::InternetOpenA, InternetOpenA, this, true);
                         PA(InternetConnectA, inet::InternetConnectA, InternetConnectA, this, true);
@@ -445,7 +488,7 @@ namespace cpl {
                         return retCode;
                     }
 
-                    int32_t Unload() override {
+                    Int32Result Unload() override {
                         InternetOpenA = nullptr;
                         InternetConnectA = nullptr;
                         HttpOpenRequestA = nullptr;
@@ -486,10 +529,10 @@ namespace cpl {
                     DeleteIpForwardEntry DeleteIpForwardEntry{};
                     CreateIpForwardEntry CreateIpForwardEntry{};
 
-                    int32_t Load() override {
+                    Int32Result Load() override {
                         INT32 retCode = ERROR_SUCCESS;
                         api::DynamicModule::szDllName = this->szDllName;
-                        retCode |= api::DynamicModule::Load();
+                        retCode |= RC(api::DynamicModule::Load());
 
                         PA(GetAdaptersInfo, ipv4::GetAdaptersInfo, GetAdaptersInfo, this, true);
                         PA(GetIpForwardTable, ipv4::GetIpForwardTable, GetIpForwardTable, this, true);
@@ -503,7 +546,7 @@ namespace cpl {
                         return retCode;
                     }
 
-                    int32_t Unload() override {
+                    Int32Result Unload() override {
                         GetAdaptersInfo = nullptr;
                         GetIpForwardTable = nullptr;
                         CreateIpForwardEntry = nullptr;
@@ -596,10 +639,10 @@ namespace cpl {
                     DeleteIpForwardEntry2 DeleteIpForwardEntry2{};
                     FreeMibTable FreeMibTable{};
 
-                    int32_t Load() override {
+                    Int32Result Load() override {
                         INT32 retCode = ERROR_SUCCESS;
                         api::DynamicModule::szDllName = this->szDllName;
-                        retCode |= api::DynamicModule::Load();
+                        retCode |= RC(api::DynamicModule::Load());
 
                         PA(GetIpForwardTable2, ipv6::GetIpForwardTable2, GetIpForwardTable2, this, false);
                         PA(DeleteIpForwardEntry2, ipv6::DeleteIpForwardEntry2, DeleteIpForwardEntry2, this, false);
@@ -612,7 +655,7 @@ namespace cpl {
                         return retCode;
                     }
 
-                    int32_t Unload() override {
+                    Int32Result Unload() override {
                         GetIpForwardTable2 = nullptr;
                         DeleteIpForwardEntry2 = nullptr;
                         FreeMibTable = nullptr;
@@ -659,10 +702,10 @@ namespace cpl {
                     EnumProcessModules EnumProcessModules{};
                     EnumProcessModulesEx EnumProcessModulesEx{};
 
-                    int32_t Load() override {
+                    Int32Result Load() override {
                         INT32 retCode = ERROR_SUCCESS;
                         api::DynamicModule::szDllName = this->szDllName;
-                        retCode |= api::DynamicModule::Load();
+                        retCode |= RC(api::DynamicModule::Load());
 
                         PA(GetModuleFileNameExA, psapi::GetModuleFileNameExA, GetModuleFileNameExA, this, true);
                         PA(EnumProcesses, psapi::EnumProcesses, EnumProcesses, this, true);
@@ -676,7 +719,7 @@ namespace cpl {
                         return retCode;
                     }
 
-                    int32_t Unload() override {
+                    Int32Result Unload() override {
                         EnumProcessModulesEx = nullptr;
                         EnumProcessModules = nullptr;
                         EnumProcesses = nullptr;
@@ -715,10 +758,10 @@ namespace cpl {
                     NtQueryInformationProcess NtQueryInformationProcess{};
                     RtlGetVersion RtlGetVersion{};
 
-                    int32_t Load() override {
+                    Int32Result Load() override {
                         INT32 retCode = ERROR_SUCCESS;
                         api::DynamicModule::szDllName = this->szDllName;
-                        retCode |= api::DynamicModule::Load();
+                        retCode |= RC(api::DynamicModule::Load());
 
                         PA(NtSuspendProcess, ntdll::NtSuspendProcess, NtSuspendProcess, this, true);
                         PA(NtResumeProcess, ntdll::NtResumeProcess, NtResumeProcess, this, true);
@@ -735,7 +778,7 @@ namespace cpl {
                         return retCode;
                     }
 
-                    int32_t Unload() override {
+                    Int32Result Unload() override {
                         NtSuspendProcess = nullptr;
                         NtResumeProcess = nullptr;
                         NtTerminateProcess = nullptr;
@@ -764,10 +807,10 @@ namespace cpl {
                     CreateEnvironmentBlock CreateEnvironmentBlock{};
                     DestroyEnvironmentBlock DestroyEnvironmentBlock{};
 
-                    int32_t Load() override {
+                    Int32Result Load() override {
                         INT32 retCode = ERROR_SUCCESS;
                         api::DynamicModule::szDllName = this->szDllName;
-                        retCode |= api::DynamicModule::Load();
+                        retCode |= RC(api::DynamicModule::Load());
 
                         PA(CreateEnvironmentBlock, userenv::CreateEnvironmentBlock, CreateEnvironmentBlock, this, true);
                         PA(DestroyEnvironmentBlock, userenv::DestroyEnvironmentBlock, DestroyEnvironmentBlock, this,
@@ -780,7 +823,7 @@ namespace cpl {
                         return retCode;
                     }
 
-                    int32_t Unload() override {
+                    Int32Result Unload() override {
                         CreateEnvironmentBlock = nullptr;
                         DestroyEnvironmentBlock = nullptr;
                         return api::DynamicModule::Unload();
@@ -814,10 +857,10 @@ namespace cpl {
                     WTSGetActiveConsoleSessionId WTSGetActiveConsoleSessionId{};
                     QueryFullProcessImageNameA QueryFullProcessImageNameA{};
 
-                    int32_t Load() override {
+                    Int32Result Load() override {
                         INT32 retCode = ERROR_SUCCESS;
                         api::DynamicModule::szDllName = this->szDllName;
-                        retCode |= api::DynamicModule::Load();
+                        retCode |= RC(api::DynamicModule::Load());
 
                         PA(ProcessIdToSessionId, kernel32::ProcessIdToSessionId, ProcessIdToSessionId, this, false);
                         PA(WTSGetActiveConsoleSessionId, kernel32::WTSGetActiveConsoleSessionId,
@@ -832,7 +875,7 @@ namespace cpl {
                         return retCode;
                     }
 
-                    int32_t Unload() override {
+                    Int32Result Unload() override {
                         return api::DynamicModule::Unload();
                     }
                 };
@@ -855,10 +898,10 @@ namespace cpl {
 
                     SendMessageTimeoutA SendMessageTimeoutA{};
 
-                    int32_t Load() override {
+                    Int32Result Load() override {
                         INT32 retCode = ERROR_SUCCESS;
                         api::DynamicModule::szDllName = this->szDllName;
-                        retCode |= api::DynamicModule::Load();
+                        retCode |= RC(api::DynamicModule::Load());
                         PA(SendMessageTimeoutA, user32::SendMessageTimeoutA, SendMessageTimeoutA, this, true);
 
                         goto __FREE__;
@@ -868,7 +911,7 @@ namespace cpl {
                         return retCode;
                     }
 
-                    int32_t Unload() override {
+                    Int32Result Unload() override {
                         SendMessageTimeoutA = nullptr;
                         return api::DynamicModule::Unload();
                     }
@@ -886,10 +929,10 @@ namespace cpl {
                     const string szDllName = "Wtsapi32.dll";
                     WTSQueryUserToken WTSQueryUserToken{};
 
-                    int32_t Load() override {
+                    Int32Result Load() override {
                         INT32 retCode = ERROR_SUCCESS;
                         api::DynamicModule::szDllName = this->szDllName;
-                        retCode |= api::DynamicModule::Load();
+                        retCode |= RC(api::DynamicModule::Load());
 
                         PA(WTSQueryUserToken, wtsapi32::WTSQueryUserToken, WTSQueryUserToken, this, false);
 
@@ -900,7 +943,7 @@ namespace cpl {
                         return retCode;
                     }
 
-                    int32_t Unload() override {
+                    Int32Result Unload() override {
                         WTSQueryUserToken = nullptr;
                         return api::DynamicModule::Unload();
                     }
@@ -949,21 +992,21 @@ namespace cpl {
                     return true;
                 }
 
-                int32_t Load() override {
+                Int32Result Load() override {
                     INT32 retCode = ERROR_SUCCESS;
                     for (const auto &mod: this->modules) {
                         if (!mod->IsLoaded()) {
-                            retCode |= mod->Load();
+                            retCode |= RC(mod->Load());
                         }
                     }
                     return retCode;
                 }
 
-                int32_t Unload() override {
+                Int32Result Unload() override {
                     INT32 retCode = ERROR_SUCCESS;
                     for (const auto &mod: this->modules) {
                         if (mod->IsLoaded()) {
-                            retCode |= mod->Unload();
+                            retCode |= RC(mod->Unload());
                         }
                     }
                     return retCode;
@@ -1639,7 +1682,7 @@ namespace Crypt32 {
                 if (!ret_CryptBinaryToStringA) {
                 } else {
                     any_loaded = true;
-                    CryptBinaryToStringA = ret_CryptBinaryToStringA.value<>();
+                    CryptBinaryToStringA = ret_CryptBinaryToStringA.value();
                 }
                 if (ok && (any_loaded || DLL_NAMES.size() == 1)) {
                     return 0;
@@ -1696,105 +1739,105 @@ namespace AdvAPI32 {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    ConvertStringSecurityDescriptorToSecurityDescriptorA = ret_ConvertStringSecurityDescriptorToSecurityDescriptorA.value<>();
+                    ConvertStringSecurityDescriptorToSecurityDescriptorA = ret_ConvertStringSecurityDescriptorToSecurityDescriptorA.value();
                 }
                 const auto ret_ConvertSidToStringSidA = api::DynamicModule::LoadFunction<::cpl::sys::api::AdvAPI32::ConvertSidToStringSidA>("ConvertSidToStringSidA");
                 if (!ret_ConvertSidToStringSidA) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    ConvertSidToStringSidA = ret_ConvertSidToStringSidA.value<>();
+                    ConvertSidToStringSidA = ret_ConvertSidToStringSidA.value();
                 }
                 const auto ret_ConvertStringSidToSidA = api::DynamicModule::LoadFunction<::cpl::sys::api::AdvAPI32::ConvertStringSidToSidA>("ConvertStringSidToSidA");
                 if (!ret_ConvertStringSidToSidA) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    ConvertStringSidToSidA = ret_ConvertStringSidToSidA.value<>();
+                    ConvertStringSidToSidA = ret_ConvertStringSidToSidA.value();
                 }
                 const auto ret_RtlGenRandom = api::DynamicModule::LoadFunction<::cpl::sys::api::AdvAPI32::RtlGenRandom>("RtlGenRandom", false);
                 if (!ret_RtlGenRandom) {
                 } else {
                     any_loaded = true;
-                    RtlGenRandom = ret_RtlGenRandom.value<>();
+                    RtlGenRandom = ret_RtlGenRandom.value();
                 }
                 const auto ret_CryptAcquireContextA = api::DynamicModule::LoadFunction<::cpl::sys::api::AdvAPI32::CryptAcquireContextA>("CryptAcquireContextA", false);
                 if (!ret_CryptAcquireContextA) {
                 } else {
                     any_loaded = true;
-                    CryptAcquireContextA = ret_CryptAcquireContextA.value<>();
+                    CryptAcquireContextA = ret_CryptAcquireContextA.value();
                 }
                 const auto ret_CryptReleaseContext = api::DynamicModule::LoadFunction<::cpl::sys::api::AdvAPI32::CryptReleaseContext>("CryptReleaseContext", false);
                 if (!ret_CryptReleaseContext) {
                 } else {
                     any_loaded = true;
-                    CryptReleaseContext = ret_CryptReleaseContext.value<>();
+                    CryptReleaseContext = ret_CryptReleaseContext.value();
                 }
                 const auto ret_CryptGenRandom = api::DynamicModule::LoadFunction<::cpl::sys::api::AdvAPI32::CryptGenRandom>("CryptGenRandom", false);
                 if (!ret_CryptGenRandom) {
                 } else {
                     any_loaded = true;
-                    CryptGenRandom = ret_CryptGenRandom.value<>();
+                    CryptGenRandom = ret_CryptGenRandom.value();
                 }
                 const auto ret_CryptImportKey = api::DynamicModule::LoadFunction<::cpl::sys::api::AdvAPI32::CryptImportKey>("CryptImportKey", false);
                 if (!ret_CryptImportKey) {
                 } else {
                     any_loaded = true;
-                    CryptImportKey = ret_CryptImportKey.value<>();
+                    CryptImportKey = ret_CryptImportKey.value();
                 }
                 const auto ret_CryptDestroyKey = api::DynamicModule::LoadFunction<::cpl::sys::api::AdvAPI32::CryptDestroyKey>("CryptDestroyKey", false);
                 if (!ret_CryptDestroyKey) {
                 } else {
                     any_loaded = true;
-                    CryptDestroyKey = ret_CryptDestroyKey.value<>();
+                    CryptDestroyKey = ret_CryptDestroyKey.value();
                 }
                 const auto ret_CryptSetKeyParam = api::DynamicModule::LoadFunction<::cpl::sys::api::AdvAPI32::CryptSetKeyParam>("CryptSetKeyParam", false);
                 if (!ret_CryptSetKeyParam) {
                 } else {
                     any_loaded = true;
-                    CryptSetKeyParam = ret_CryptSetKeyParam.value<>();
+                    CryptSetKeyParam = ret_CryptSetKeyParam.value();
                 }
                 const auto ret_CryptEncrypt = api::DynamicModule::LoadFunction<::cpl::sys::api::AdvAPI32::CryptEncrypt>("CryptEncrypt", false);
                 if (!ret_CryptEncrypt) {
                 } else {
                     any_loaded = true;
-                    CryptEncrypt = ret_CryptEncrypt.value<>();
+                    CryptEncrypt = ret_CryptEncrypt.value();
                 }
                 const auto ret_CryptDecrypt = api::DynamicModule::LoadFunction<::cpl::sys::api::AdvAPI32::CryptDecrypt>("CryptDecrypt", false);
                 if (!ret_CryptDecrypt) {
                 } else {
                     any_loaded = true;
-                    CryptDecrypt = ret_CryptDecrypt.value<>();
+                    CryptDecrypt = ret_CryptDecrypt.value();
                 }
                 const auto ret_CryptCreateHash = api::DynamicModule::LoadFunction<::cpl::sys::api::AdvAPI32::CryptCreateHash>("CryptCreateHash", false);
                 if (!ret_CryptCreateHash) {
                 } else {
                     any_loaded = true;
-                    CryptCreateHash = ret_CryptCreateHash.value<>();
+                    CryptCreateHash = ret_CryptCreateHash.value();
                 }
                 const auto ret_CryptDestroyHash = api::DynamicModule::LoadFunction<::cpl::sys::api::AdvAPI32::CryptDestroyHash>("CryptDestroyHash", false);
                 if (!ret_CryptDestroyHash) {
                 } else {
                     any_loaded = true;
-                    CryptDestroyHash = ret_CryptDestroyHash.value<>();
+                    CryptDestroyHash = ret_CryptDestroyHash.value();
                 }
                 const auto ret_CryptSetHashParam = api::DynamicModule::LoadFunction<::cpl::sys::api::AdvAPI32::CryptSetHashParam>("CryptSetHashParam", false);
                 if (!ret_CryptSetHashParam) {
                 } else {
                     any_loaded = true;
-                    CryptSetHashParam = ret_CryptSetHashParam.value<>();
+                    CryptSetHashParam = ret_CryptSetHashParam.value();
                 }
                 const auto ret_CryptGetHashParam = api::DynamicModule::LoadFunction<::cpl::sys::api::AdvAPI32::CryptGetHashParam>("CryptGetHashParam", false);
                 if (!ret_CryptGetHashParam) {
                 } else {
                     any_loaded = true;
-                    CryptGetHashParam = ret_CryptGetHashParam.value<>();
+                    CryptGetHashParam = ret_CryptGetHashParam.value();
                 }
                 const auto ret_CryptHashData = api::DynamicModule::LoadFunction<::cpl::sys::api::AdvAPI32::CryptHashData>("CryptHashData", false);
                 if (!ret_CryptHashData) {
                 } else {
                     any_loaded = true;
-                    CryptHashData = ret_CryptHashData.value<>();
+                    CryptHashData = ret_CryptHashData.value();
                 }
                 if (ok && (any_loaded || DLL_NAMES.size() == 1)) {
                     return 0;
@@ -1850,7 +1893,7 @@ namespace bcrypt {
                 if (!ret_BCryptGenRandom) {
                 } else {
                     any_loaded = true;
-                    BCryptGenRandom = ret_BCryptGenRandom.value<>();
+                    BCryptGenRandom = ret_BCryptGenRandom.value();
                 }
                 if (ok && (any_loaded || DLL_NAMES.size() == 1)) {
                     return 0;
@@ -1903,91 +1946,91 @@ namespace Ws2_32 {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    WSAStartup = ret_WSAStartup.value<>();
+                    WSAStartup = ret_WSAStartup.value();
                 }
                 const auto ret_WSACleanup = api::DynamicModule::LoadFunction<::cpl::sys::api::Ws2_32::WSACleanup>("WSACleanup");
                 if (!ret_WSACleanup) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    WSACleanup = ret_WSACleanup.value<>();
+                    WSACleanup = ret_WSACleanup.value();
                 }
                 const auto ret_WSAGetLastError = api::DynamicModule::LoadFunction<::cpl::sys::api::Ws2_32::WSAGetLastError>("WSAGetLastError");
                 if (!ret_WSAGetLastError) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    WSAGetLastError = ret_WSAGetLastError.value<>();
+                    WSAGetLastError = ret_WSAGetLastError.value();
                 }
                 const auto ret_socket = api::DynamicModule::LoadFunction<::cpl::sys::api::Ws2_32::socket>("socket");
                 if (!ret_socket) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    socket = ret_socket.value<>();
+                    socket = ret_socket.value();
                 }
                 const auto ret_htons = api::DynamicModule::LoadFunction<::cpl::sys::api::Ws2_32::htons>("htons");
                 if (!ret_htons) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    htons = ret_htons.value<>();
+                    htons = ret_htons.value();
                 }
                 const auto ret_inet_addr = api::DynamicModule::LoadFunction<::cpl::sys::api::Ws2_32::inet_addr>("inet_addr");
                 if (!ret_inet_addr) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    inet_addr = ret_inet_addr.value<>();
+                    inet_addr = ret_inet_addr.value();
                 }
                 const auto ret_sendto = api::DynamicModule::LoadFunction<::cpl::sys::api::Ws2_32::sendto>("sendto");
                 if (!ret_sendto) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    sendto = ret_sendto.value<>();
+                    sendto = ret_sendto.value();
                 }
                 const auto ret_closesocket = api::DynamicModule::LoadFunction<::cpl::sys::api::Ws2_32::closesocket>("closesocket");
                 if (!ret_closesocket) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    closesocket = ret_closesocket.value<>();
+                    closesocket = ret_closesocket.value();
                 }
                 const auto ret_setsockopt = api::DynamicModule::LoadFunction<::cpl::sys::api::Ws2_32::setsockopt>("setsockopt");
                 if (!ret_setsockopt) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    setsockopt = ret_setsockopt.value<>();
+                    setsockopt = ret_setsockopt.value();
                 }
                 const auto ret_bind = api::DynamicModule::LoadFunction<::cpl::sys::api::Ws2_32::bind>("bind");
                 if (!ret_bind) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    bind = ret_bind.value<>();
+                    bind = ret_bind.value();
                 }
                 const auto ret_recvfrom = api::DynamicModule::LoadFunction<::cpl::sys::api::Ws2_32::recvfrom>("recvfrom");
                 if (!ret_recvfrom) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    recvfrom = ret_recvfrom.value<>();
+                    recvfrom = ret_recvfrom.value();
                 }
                 const auto ret_ntohs = api::DynamicModule::LoadFunction<::cpl::sys::api::Ws2_32::ntohs>("ntohs");
                 if (!ret_ntohs) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    ntohs = ret_ntohs.value<>();
+                    ntohs = ret_ntohs.value();
                 }
                 const auto ret_ioctlsocket = api::DynamicModule::LoadFunction<::cpl::sys::api::Ws2_32::ioctlsocket>("ioctlsocket");
                 if (!ret_ioctlsocket) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    ioctlsocket = ret_ioctlsocket.value<>();
+                    ioctlsocket = ret_ioctlsocket.value();
                 }
                 if (ok && (any_loaded || DLL_NAMES.size() == 1)) {
                     return 0;
@@ -2046,49 +2089,49 @@ namespace WinINet {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    InternetOpenA = ret_InternetOpenA.value<>();
+                    InternetOpenA = ret_InternetOpenA.value();
                 }
                 const auto ret_InternetConnectA = api::DynamicModule::LoadFunction<::cpl::sys::api::WinINet::InternetConnectA>("InternetConnectA");
                 if (!ret_InternetConnectA) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    InternetConnectA = ret_InternetConnectA.value<>();
+                    InternetConnectA = ret_InternetConnectA.value();
                 }
                 const auto ret_HttpOpenRequestA = api::DynamicModule::LoadFunction<::cpl::sys::api::WinINet::HttpOpenRequestA>("HttpOpenRequestA");
                 if (!ret_HttpOpenRequestA) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    HttpOpenRequestA = ret_HttpOpenRequestA.value<>();
+                    HttpOpenRequestA = ret_HttpOpenRequestA.value();
                 }
                 const auto ret_HttpSendRequestA = api::DynamicModule::LoadFunction<::cpl::sys::api::WinINet::HttpSendRequestA>("HttpSendRequestA");
                 if (!ret_HttpSendRequestA) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    HttpSendRequestA = ret_HttpSendRequestA.value<>();
+                    HttpSendRequestA = ret_HttpSendRequestA.value();
                 }
                 const auto ret_InternetReadFile = api::DynamicModule::LoadFunction<::cpl::sys::api::WinINet::InternetReadFile>("InternetReadFile");
                 if (!ret_InternetReadFile) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    InternetReadFile = ret_InternetReadFile.value<>();
+                    InternetReadFile = ret_InternetReadFile.value();
                 }
                 const auto ret_InternetCloseHandle = api::DynamicModule::LoadFunction<::cpl::sys::api::WinINet::InternetCloseHandle>("InternetCloseHandle");
                 if (!ret_InternetCloseHandle) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    InternetCloseHandle = ret_InternetCloseHandle.value<>();
+                    InternetCloseHandle = ret_InternetCloseHandle.value();
                 }
                 const auto ret_InternetCrackUrlA = api::DynamicModule::LoadFunction<::cpl::sys::api::WinINet::InternetCrackUrlA>("InternetCrackUrlA");
                 if (!ret_InternetCrackUrlA) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    InternetCrackUrlA = ret_InternetCrackUrlA.value<>();
+                    InternetCrackUrlA = ret_InternetCrackUrlA.value();
                 }
                 if (ok && (any_loaded || DLL_NAMES.size() == 1)) {
                     return 0;
@@ -2139,35 +2182,35 @@ namespace IPv4 {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    GetAdaptersInfo = ret_GetAdaptersInfo.value<>();
+                    GetAdaptersInfo = ret_GetAdaptersInfo.value();
                 }
                 const auto ret_GetAdaptersAddresses = api::DynamicModule::LoadFunction<::cpl::sys::api::IPv4::GetAdaptersAddresses>("GetAdaptersAddresses");
                 if (!ret_GetAdaptersAddresses) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    GetAdaptersAddresses = ret_GetAdaptersAddresses.value<>();
+                    GetAdaptersAddresses = ret_GetAdaptersAddresses.value();
                 }
                 const auto ret_GetIpForwardTable = api::DynamicModule::LoadFunction<::cpl::sys::api::IPv4::GetIpForwardTable>("GetIpForwardTable");
                 if (!ret_GetIpForwardTable) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    GetIpForwardTable = ret_GetIpForwardTable.value<>();
+                    GetIpForwardTable = ret_GetIpForwardTable.value();
                 }
                 const auto ret_DeleteIpForwardEntry = api::DynamicModule::LoadFunction<::cpl::sys::api::IPv4::DeleteIpForwardEntry>("DeleteIpForwardEntry");
                 if (!ret_DeleteIpForwardEntry) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    DeleteIpForwardEntry = ret_DeleteIpForwardEntry.value<>();
+                    DeleteIpForwardEntry = ret_DeleteIpForwardEntry.value();
                 }
                 const auto ret_CreateIpForwardEntry = api::DynamicModule::LoadFunction<::cpl::sys::api::IPv4::CreateIpForwardEntry>("CreateIpForwardEntry");
                 if (!ret_CreateIpForwardEntry) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    CreateIpForwardEntry = ret_CreateIpForwardEntry.value<>();
+                    CreateIpForwardEntry = ret_CreateIpForwardEntry.value();
                 }
                 if (ok && (any_loaded || DLL_NAMES.size() == 1)) {
                     return 0;
@@ -2213,19 +2256,19 @@ namespace IPv6 {
                 if (!ret_GetIpForwardTable2) {
                 } else {
                     any_loaded = true;
-                    GetIpForwardTable2 = ret_GetIpForwardTable2.value<>();
+                    GetIpForwardTable2 = ret_GetIpForwardTable2.value();
                 }
                 const auto ret_DeleteIpForwardEntry2 = api::DynamicModule::LoadFunction<::cpl::sys::api::IPv6::DeleteIpForwardEntry2>("DeleteIpForwardEntry2", false);
                 if (!ret_DeleteIpForwardEntry2) {
                 } else {
                     any_loaded = true;
-                    DeleteIpForwardEntry2 = ret_DeleteIpForwardEntry2.value<>();
+                    DeleteIpForwardEntry2 = ret_DeleteIpForwardEntry2.value();
                 }
                 const auto ret_FreeMibTable = api::DynamicModule::LoadFunction<::cpl::sys::api::IPv6::FreeMibTable>("FreeMibTable", false);
                 if (!ret_FreeMibTable) {
                 } else {
                     any_loaded = true;
-                    FreeMibTable = ret_FreeMibTable.value<>();
+                    FreeMibTable = ret_FreeMibTable.value();
                 }
                 if (ok && (any_loaded || DLL_NAMES.size() == 1)) {
                     return 0;
@@ -2270,25 +2313,25 @@ namespace PsAPI {
                 if (!ret_GetModuleFileNameExA) {
                 } else {
                     any_loaded = true;
-                    GetModuleFileNameExA = ret_GetModuleFileNameExA.value<>();
+                    GetModuleFileNameExA = ret_GetModuleFileNameExA.value();
                 }
                 const auto ret_EnumProcesses = api::DynamicModule::LoadFunction<::cpl::sys::api::PsAPI::EnumProcesses>("EnumProcesses", false);
                 if (!ret_EnumProcesses) {
                 } else {
                     any_loaded = true;
-                    EnumProcesses = ret_EnumProcesses.value<>();
+                    EnumProcesses = ret_EnumProcesses.value();
                 }
                 const auto ret_EnumProcessModules = api::DynamicModule::LoadFunction<::cpl::sys::api::PsAPI::EnumProcessModules>("EnumProcessModules", false);
                 if (!ret_EnumProcessModules) {
                 } else {
                     any_loaded = true;
-                    EnumProcessModules = ret_EnumProcessModules.value<>();
+                    EnumProcessModules = ret_EnumProcessModules.value();
                 }
                 const auto ret_EnumProcessModulesEx = api::DynamicModule::LoadFunction<::cpl::sys::api::PsAPI::EnumProcessModulesEx>("EnumProcessModulesEx", false);
                 if (!ret_EnumProcessModulesEx) {
                 } else {
                     any_loaded = true;
-                    EnumProcessModulesEx = ret_EnumProcessModulesEx.value<>();
+                    EnumProcessModulesEx = ret_EnumProcessModulesEx.value();
                 }
                 if (ok && (any_loaded || DLL_NAMES.size() == 1)) {
                     return 0;
@@ -2336,35 +2379,35 @@ namespace NtDLL {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    NtSuspendProcess = ret_NtSuspendProcess.value<>();
+                    NtSuspendProcess = ret_NtSuspendProcess.value();
                 }
                 const auto ret_NtResumeProcess = api::DynamicModule::LoadFunction<::cpl::sys::api::NtDLL::NtResumeProcess>("NtResumeProcess");
                 if (!ret_NtResumeProcess) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    NtResumeProcess = ret_NtResumeProcess.value<>();
+                    NtResumeProcess = ret_NtResumeProcess.value();
                 }
                 const auto ret_NtTerminateProcess = api::DynamicModule::LoadFunction<::cpl::sys::api::NtDLL::NtTerminateProcess>("NtTerminateProcess");
                 if (!ret_NtTerminateProcess) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    NtTerminateProcess = ret_NtTerminateProcess.value<>();
+                    NtTerminateProcess = ret_NtTerminateProcess.value();
                 }
                 const auto ret_NtQueryInformationProcess = api::DynamicModule::LoadFunction<::cpl::sys::api::NtDLL::NtQueryInformationProcess>("NtQueryInformationProcess");
                 if (!ret_NtQueryInformationProcess) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    NtQueryInformationProcess = ret_NtQueryInformationProcess.value<>();
+                    NtQueryInformationProcess = ret_NtQueryInformationProcess.value();
                 }
                 const auto ret_RtlGetVersion = api::DynamicModule::LoadFunction<::cpl::sys::api::NtDLL::RtlGetVersion>("RtlGetVersion");
                 if (!ret_RtlGetVersion) {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    RtlGetVersion = ret_RtlGetVersion.value<>();
+                    RtlGetVersion = ret_RtlGetVersion.value();
                 }
                 if (ok && (any_loaded || DLL_NAMES.size() == 1)) {
                     return 0;
@@ -2409,13 +2452,13 @@ namespace UserEnv {
                 if (!ret_CreateEnvironmentBlock) {
                 } else {
                     any_loaded = true;
-                    CreateEnvironmentBlock = ret_CreateEnvironmentBlock.value<>();
+                    CreateEnvironmentBlock = ret_CreateEnvironmentBlock.value();
                 }
                 const auto ret_DestroyEnvironmentBlock = api::DynamicModule::LoadFunction<::cpl::sys::api::UserEnv::DestroyEnvironmentBlock>("DestroyEnvironmentBlock", false);
                 if (!ret_DestroyEnvironmentBlock) {
                 } else {
                     any_loaded = true;
-                    DestroyEnvironmentBlock = ret_DestroyEnvironmentBlock.value<>();
+                    DestroyEnvironmentBlock = ret_DestroyEnvironmentBlock.value();
                 }
                 if (ok && (any_loaded || DLL_NAMES.size() == 1)) {
                     return 0;
@@ -2458,19 +2501,19 @@ namespace Kernel32 {
                 if (!ret_ProcessIdToSessionId) {
                 } else {
                     any_loaded = true;
-                    ProcessIdToSessionId = ret_ProcessIdToSessionId.value<>();
+                    ProcessIdToSessionId = ret_ProcessIdToSessionId.value();
                 }
                 const auto ret_WTSGetActiveConsoleSessionId = api::DynamicModule::LoadFunction<::cpl::sys::api::Kernel32::WTSGetActiveConsoleSessionId>("WTSGetActiveConsoleSessionId", false);
                 if (!ret_WTSGetActiveConsoleSessionId) {
                 } else {
                     any_loaded = true;
-                    WTSGetActiveConsoleSessionId = ret_WTSGetActiveConsoleSessionId.value<>();
+                    WTSGetActiveConsoleSessionId = ret_WTSGetActiveConsoleSessionId.value();
                 }
                 const auto ret_QueryFullProcessImageNameA = api::DynamicModule::LoadFunction<::cpl::sys::api::Kernel32::QueryFullProcessImageNameA>("QueryFullProcessImageNameA", false);
                 if (!ret_QueryFullProcessImageNameA) {
                 } else {
                     any_loaded = true;
-                    QueryFullProcessImageNameA = ret_QueryFullProcessImageNameA.value<>();
+                    QueryFullProcessImageNameA = ret_QueryFullProcessImageNameA.value();
                 }
                 if (ok && (any_loaded || DLL_NAMES.size() == 1)) {
                     return 0;
@@ -2512,7 +2555,7 @@ namespace User32 {
                 if (!ret_SendMessageTimeoutA) {
                 } else {
                     any_loaded = true;
-                    SendMessageTimeoutA = ret_SendMessageTimeoutA.value<>();
+                    SendMessageTimeoutA = ret_SendMessageTimeoutA.value();
                 }
                 if (ok && (any_loaded || DLL_NAMES.size() == 1)) {
                     return 0;
@@ -2552,7 +2595,7 @@ namespace WtsAPI32 {
                 if (!ret_WTSQueryUserToken) {
                 } else {
                     any_loaded = true;
-                    WTSQueryUserToken = ret_WTSQueryUserToken.value<>();
+                    WTSQueryUserToken = ret_WTSQueryUserToken.value();
                 }
                 if (ok && (any_loaded || DLL_NAMES.size() == 1)) {
                     return 0;
@@ -2593,7 +2636,7 @@ namespace MsImg32 {
                     ok = false;
                 } else {
                     any_loaded = true;
-                    GradientFill = ret_GradientFill.value<>();
+                    GradientFill = ret_GradientFill.value();
                 }
                 if (ok && (any_loaded || DLL_NAMES.size() == 1)) {
                     return 0;

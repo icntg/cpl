@@ -7,6 +7,8 @@
 #include <cstdlib>
 #include <array>
 #include <memory>
+#include <cstring>
+#include <ctime>
 
 #include "strings.hpp"
 
@@ -720,7 +722,8 @@ namespace cpl {
                         if (size != SHA256::SHA256_BYTES) {
                             return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, "Unexpected HMAC output size"));
                         }
-                        signL.resize(size);
+                        // Truncate to the on-wire signature length (matches Decrypt).
+                        signL.resize(SIGN_L_BYTES_LENGTH);
                     }
                     // crypt
                     {
@@ -728,7 +731,7 @@ namespace cpl {
                         if (!_rc4) {
                             return Err(Errors::CREATE_RC4_, CPL_FILE_AND_LINE);
                         }
-                        auto rc4 = _rc4.value<>();
+                        auto rc4 = _rc4.value();
                         size_t size{};
                         encrypted.resize(inSize); {
                             const auto r = rc4.Encrypt(encrypted.data(), size, inBuffer, inSize);
@@ -771,7 +774,8 @@ namespace cpl {
                         if (size != SHA256::SHA256_BYTES) {
                             return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, "Unexpected HMAC output size"));
                         }
-                        signE.resize(size);
+                        // Truncate to the on-wire signature length (matches Decrypt).
+                        signE.resize(SIGN_E_BYTES_LENGTH);
                     }
                     // output
                     {
@@ -982,7 +986,7 @@ namespace cpl {
                         if (!_rc4) {
                             return Err(Errors::CREATE_RC4_, CPL_FILE_AND_LINE);
                         }
-                        auto rc4 = _rc4.value<>();
+                        auto rc4 = _rc4.value();
                         size_t decryptedSize{};
                         const auto r = rc4.Decrypt(outBuffer, decryptedSize, encrypted.data(), encrypted.size());
                         if (!r) {
@@ -1135,7 +1139,7 @@ namespace cpl {
                     Result<Stream> Decrypt(const Stream &in) override {
                         Stream buffer{};
                         buffer.resize(in.size());
-                        size_t outSize{}; {
+                        size_t outSize = buffer.size(); {
                             const auto r = crypto->Decrypt(buffer.data(), outSize, in.data(), in.size()).
                                     transform_error([](const cpl::Error &e) {
                                         return cpl::Error{

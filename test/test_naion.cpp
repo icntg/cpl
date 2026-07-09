@@ -28,6 +28,15 @@ static bool SameData(const Stream &a, const Stream &b) {
     return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin());
 }
 
+// Derive the server Ed25519 public key from a seed (mirrors what the CSM
+// client must be handed at creation time).
+static EPK ServerPublicKeyFromSeed(const ESD &seed) {
+    EPK pk{};
+    ESK sk{};
+    REQUIRE_EQ(naion_sign_ed25519_seed_keypair(pk.data(), sk.data(), seed.data()), 0);
+    return pk;
+}
+
 TEST_SUITE("naion utility") {
     TEST_CASE("Seal rejects empty input") {
         XPK bobPk{}, alicePk{};
@@ -89,16 +98,26 @@ TEST_SUITE("naion utility") {
         const auto sig = Must(Utility::Sign(msg, sk));
         CHECK_FALSE(Must(Utility::Verify(sig, tampered, pk)));
     }
+
+    TEST_CASE("RandomBytesBuf fills distinct buffers") {
+        Stream a(64, 0), b(64, 0);
+        REQUIRE(Must(RandomBytesBuf(a.data(), a.size())) == 0);
+        REQUIRE(Must(RandomBytesBuf(b.data(), b.size())) == 0);
+        CHECK_FALSE(SameData(a, b));
+        // All-zero buffer would indicate the RNG is a no-op.
+        CHECK_FALSE(std::all_of(a.begin(), a.end(), [](uint8_t x) { return x == 0; }));
+    }
 }
 
 TEST_SUITE("naion client_server") {
     TEST_CASE("Create works") {
         const auto serverSeed = GenerateRandomSeed();
+        const auto serverPk = ServerPublicKeyFromSeed(serverSeed);
+
         auto server = Must(Server::Create(serverSeed));
         CHECK(server != nullptr);
-        EPK serverPk{};
-        ESK serverSk{};
-        CHECK_EQ(naion_sign_ed25519_seed_keypair(serverPk.data(), serverSk.data(), serverSeed.data()), 0);
+        CHECK(SameData(Stream(server->GetPublicKey().begin(), server->GetPublicKey().end()),
+                       Stream(serverPk.begin(), serverPk.end())));
 
         auto client = Must(Client::Create(GenerateRandomSeed(), serverPk));
         CHECK(client != nullptr);
@@ -106,10 +125,7 @@ TEST_SUITE("naion client_server") {
 
     TEST_CASE("Client Encrypt rejects empty input") {
         const auto serverSeed = GenerateRandomSeed();
-        auto server = Must(Server::Create(serverSeed));
-        EPK serverPk{};
-        ESK serverSk{};
-        CHECK_EQ(naion_sign_ed25519_seed_keypair(serverPk.data(), serverSk.data(), serverSeed.data()), 0);
+        const auto serverPk = ServerPublicKeyFromSeed(serverSeed);
         auto client = Must(Client::Create(GenerateRandomSeed(), serverPk));
 
         const Stream empty{};
@@ -119,20 +135,20 @@ TEST_SUITE("naion client_server") {
     TEST_CASE("Server Encrypt rejects before client key initialization") {
         auto server = Must(Server::Create(GenerateRandomSeed()));
         CHECK_FALSE(server->Encrypt(GenerateRandomData(64)).has_value());
+        CHECK_FALSE(server->IsClientKeyInitialized());
     }
 
     TEST_CASE("Bidirectional encryption round trip") {
         const auto serverSeed = GenerateRandomSeed();
+        const auto serverPk = ServerPublicKeyFromSeed(serverSeed);
         auto server = Must(Server::Create(serverSeed));
-        EPK serverPk{};
-        ESK serverSk{};
-        CHECK_EQ(naion_sign_ed25519_seed_keypair(serverPk.data(), serverSk.data(), serverSeed.data()), 0);
         auto client = Must(Client::Create(GenerateRandomSeed(), serverPk));
 
         const auto c2s = GenerateRandomData(MaxClientPayloadBytes - 8);
         const auto encC2S = Must(client->Encrypt(c2s));
         const auto decC2S = Must(server->Decrypt(encC2S));
         CHECK(SameData(c2s, decC2S));
+        CHECK(server->IsClientKeyInitialized());
 
         const auto s2c = GenerateRandomData(MaxServerPayloadBytes - 8);
         const auto encS2C = Must(server->Encrypt(s2c));
@@ -142,10 +158,8 @@ TEST_SUITE("naion client_server") {
 
     TEST_CASE("Packet sizes stay within UDP budget") {
         const auto serverSeed = GenerateRandomSeed();
+        const auto serverPk = ServerPublicKeyFromSeed(serverSeed);
         auto server = Must(Server::Create(serverSeed));
-        EPK serverPk{};
-        ESK serverSk{};
-        CHECK_EQ(naion_sign_ed25519_seed_keypair(serverPk.data(), serverSk.data(), serverSeed.data()), 0);
         auto client = Must(Client::Create(GenerateRandomSeed(), serverPk));
 
         const auto c2sPayload = GenerateRandomData(MaxClientPayloadBytes);
@@ -165,33 +179,40 @@ TEST_SUITE("naion client_server") {
         CHECK(SameData(s2cPayload, decS2C));
     }
 
-    TEST_CASE("Decrypt fails on tampered packet meta") {
+    TEST_CASE("Server Decrypt fails on tampered frame") {
         const auto serverSeed = GenerateRandomSeed();
+        const auto serverPk = ServerPublicKeyFromSeed(serverSeed);
         auto server = Must(Server::Create(serverSeed));
-        EPK serverPk{};
-        ESK serverSk{};
-        CHECK_EQ(naion_sign_ed25519_seed_keypair(serverPk.data(), serverSk.data(), serverSeed.data()), 0);
-        auto client = Must(Client::Create(GenerateRandomSeed(), serverPk));
-
-        auto frame = Must(client->Encrypt(GenerateRandomData(128)));
-        constexpr size_t metaOffset = naion_sign_ed25519_BYTES
-                                      + naion_box_PUBLICKEYBYTES_MAX
-                                      + naion_box_NONCEBYTES_MAX
-                                      + naion_box_MACBYTES_MAX;
-        frame[metaOffset] ^= 0x01;
-        CHECK_FALSE(server->Decrypt(frame).has_value());
-    }
-
-    TEST_CASE("Decrypt fails on tampered frame") {
-        const auto serverSeed = GenerateRandomSeed();
-        auto server = Must(Server::Create(serverSeed));
-        EPK serverPk{};
-        ESK serverSk{};
-        CHECK_EQ(naion_sign_ed25519_seed_keypair(serverPk.data(), serverSk.data(), serverSeed.data()), 0);
         auto client = Must(Client::Create(GenerateRandomSeed(), serverPk));
 
         auto frame = Must(client->Encrypt(GenerateRandomData(400)));
         frame.back() ^= 0x5A;
         CHECK_FALSE(server->Decrypt(frame).has_value());
+    }
+
+    TEST_CASE("Server Decrypt fails on truncated frame") {
+        const auto serverSeed = GenerateRandomSeed();
+        const auto serverPk = ServerPublicKeyFromSeed(serverSeed);
+        auto server = Must(Server::Create(serverSeed));
+
+        Stream tooShort(PacketOverheadBytes, 0);
+        CHECK_FALSE(server->Decrypt(tooShort).has_value());
+    }
+
+    TEST_CASE("Server Decrypt accepts replayed packet (no replay protection by design)") {
+        const auto serverSeed = GenerateRandomSeed();
+        const auto serverPk = ServerPublicKeyFromSeed(serverSeed);
+        auto server = Must(Server::Create(serverSeed));
+        auto client = Must(Client::Create(GenerateRandomSeed(), serverPk));
+
+        const auto payload = GenerateRandomData(128);
+        const auto frame = Must(client->Encrypt(payload));
+        // First decryption succeeds and learns the client key.
+        const auto dec1 = Must(server->Decrypt(frame));
+        CHECK(SameData(payload, dec1));
+        // Replaying the exact same packet must still decrypt (CSM has no replay
+        // protection by design) — the encrypted payload is unchanged.
+        const auto dec2 = Must(server->Decrypt(frame));
+        CHECK(SameData(payload, dec2));
     }
 }

@@ -7,10 +7,9 @@
 #include <vector>
 #include <cstdarg>
 #include <tuple>
-
-#ifdef _WIN32
-#include <windows.h>
-#endif
+#include <cstring>
+#include <cwchar>
+#include <cctype>
 
 namespace cpl {
     namespace strings {
@@ -87,9 +86,9 @@ namespace cpl {
                         } else if ('a' <= c && c <= 'f') {
                             w = c - 'a' + 10;
                         } else {
-                            return {};
+                            return Err(cpl::Error(cpl::Error::InvalidArgument, "[X] UnHexlify invalid character" CPL_FILE_AND_LINE));
                         }
-                        v = (v << 4) | (w & 0xf);
+                        v = static_cast<uint8_t>((v << 4) | (w & 0xf));
                     }
                     out.push_back(v);
                 }
@@ -110,17 +109,17 @@ namespace cpl {
                 if (size == 0 || size % 4 != 0) {
                     return -1;
                 }
-                size_t right_idx = size - 1;
+                size_t right_idx = size;
                 const auto ch_1 = in[size - 1];
                 const auto ch_2 = in[size - 2];
 
                 if (ch_1 == '=' && ch_2 == '=') {
-                    right_idx = size - 3;
-                } else if (ch_1 == '=') {
                     right_idx = size - 2;
+                } else if (ch_1 == '=') {
+                    right_idx = size - 1;
                 }
                 for (size_t i = 0; i < right_idx; i++) {
-                    const auto c = in[i];
+                    const auto c = static_cast<unsigned char>(in[i]);
                     const auto r = isalnum(c) || (c == '+') || (c == '/');
                     if (!r) {
                         return static_cast<int32_t>(i) + 1;
@@ -222,7 +221,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Error::OutOfRange, es.value<>());
+                    return MakeErr(Error::OutOfRange, es.value());
                 }
                 if (ir > 0) {
                     auto es = cpl::strings::Format(
@@ -232,7 +231,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Error::OutOfRange, es.value<>());
+                    return MakeErr(Error::OutOfRange, es.value());
                 }
                 static auto self = Base64();
                 static auto table = self.base64_reverse_table();
@@ -337,7 +336,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Error::OutOfRange, es.value<>());
+                    return MakeErr(Error::OutOfRange, es.value());
                 }
                 Stream out{};
                 out.clear();
@@ -372,7 +371,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Error::OutOfRange, es.value<>());
+                    return MakeErr(Error::OutOfRange, es.value());
                 }
                 out.resize(idx);
                 for (size_t i = 0; i < idx; i++) {
@@ -563,13 +562,11 @@ namespace cpl {
 
 
         inline std::string Trim(const std::string &str) {
-            size_t first = str.find_first_not_of(" \t\n\r\f\v");
+            const size_t first = str.find_first_not_of(" \t\n\r\f\v");
             if (first == std::string::npos) {
-                first = 0;
+                return "";
             }
-
             const size_t last = str.find_last_not_of(" \t\n\r\f\v");
-
             return str.substr(first, last - first + 1);
         }
 
@@ -702,7 +699,7 @@ namespace cpl {
                 }
                 cp++;
             }
-            return nullptr;
+            return Err(cpl::Error(cpl::Error::NoData, "[X] StrInStr substring not found" CPL_FILE_AND_LINE));
         }
 
         inline std::string ReplaceAll(const std::string &str, const std::string &from, const std::string &to) {
