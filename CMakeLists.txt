@@ -50,7 +50,10 @@ endif()
 option(CPL_BUILD_WIN32_TESTS "Build win32/utility tests (Windows only)" OFF)
 if(CPL_BUILD_WIN32_TESTS AND WIN32)
     add_compile_definitions(CPL_BUILD_WIN32_TESTS=1)
-    list(APPEND CPL_TEST_SOURCES test/test_win32_utility.cpp)
+    list(APPEND CPL_TEST_SOURCES
+        test/test_win32_utility.cpp
+        test/test_sys_crypto.cpp
+        test/test_sys_network.cpp)
 endif()
 
 # ── 构建可执行 ────────────────────────────────────────────────────────────
@@ -59,6 +62,7 @@ target_include_directories(cpl_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 if(WIN32)
     # win32 层链接的导入库 (advapi32/psapi/userenv 已随 SDK 提供)。
+    # 注意: ws2_32 等通过 cpl::sys::api 动态 LoadLibrary 加载, 不静态链接。
     target_link_libraries(cpl_test PRIVATE advapi32 psapi userenv)
 endif()
 

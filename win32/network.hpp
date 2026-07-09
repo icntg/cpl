@@ -8,13 +8,29 @@
 
 #include "api.hpp"
 #include "crypto.hpp"
-#include "../../ccl-del/vendor/codec/base64.h"
+// ../../ccl-del/vendor/codec/base64.h removed: legacy path no longer exists.
+// It was used only by the disabled wrapper::Post below.
+//
+// Note: cpl core has ZERO logging dependency. The legacy win32::network
+// functions below (SendHTTP/SendUDP) used loguru's LOG_F, which is why those
+// symbols appear; they are kept as-is for reference but the new
+// sys::network::wrapper::UDPSend at the bottom is fully self-contained and
+// returns Win32 error codes instead of logging.
 
 using namespace std;
 
 namespace cpl {
     namespace win32 {
         namespace network {
+#if 0
+            // ----------------------------------------------------------------------
+            // Legacy cpl::win32::network (SendHTTP/SendUDP/wrapper::SendTo/Post)
+            // disabled: these functions (a) depend on loguru's LOG_F via the
+            // removed <share.h> include path, and (b) hard-code the RC4-based
+            // Win32Crypto. New code uses cpl::sys::network::wrapper::UDPSend
+            // (provider-injectable, naion CSM, zero logging) at the bottom of
+            // this file. Retained as reference only.
+            // ----------------------------------------------------------------------
             inline INT32 SendHTTP(
                 _Out_ string &out,
                 _In_ const string &host,
@@ -39,7 +55,7 @@ namespace cpl {
                     if (nullptr == hInternetOpen) {
                         const DWORD e = GetLastError();
                         retCode = static_cast<INT32>(e);
-                        log_error("[x] InternetOpen failed: [%lu] %s", e, FormatError(e).data());
+                        LOG_F(ERROR, "[x] InternetOpen failed: [%lu] %s", e, FormatError(e).data());
                         goto __ERROR__;
                     }
                 } {
@@ -56,7 +72,7 @@ namespace cpl {
                     if (nullptr == hInternetConnect) {
                         const DWORD e = GetLastError();
                         retCode = static_cast<INT32>(e);
-                        log_error("[x] InternetConnect failed: [%lu] %s", e, FormatError(e).data());
+                        LOG_F(ERROR, "[x] InternetConnect failed: [%lu] %s", e, FormatError(e).data());
                         goto __ERROR__;
                     }
                 } {
@@ -77,7 +93,7 @@ namespace cpl {
                     if (nullptr == hHttpOpenRequest) {
                         const DWORD e = GetLastError();
                         retCode = static_cast<INT32>(e);
-                        log_error("[x] HttpOpenRequest failed: [%lu] %s", e, FormatError(e).data());
+                        LOG_F(ERROR, "[x] HttpOpenRequest failed: [%lu] %s", e, FormatError(e).data());
                         goto __ERROR__;
                     }
                 } {
@@ -98,7 +114,7 @@ namespace cpl {
                     if (!bRet) {
                         const DWORD e = GetLastError();
                         retCode = static_cast<INT32>(e);
-                        log_error("[x] HttpSendRequest failed: [%lu] %s", e, FormatError(e).data());
+                        LOG_F(ERROR, "[x] HttpSendRequest failed: [%lu] %s", e, FormatError(e).data());
                         goto __ERROR__;
                     }
                 } {
@@ -119,7 +135,7 @@ namespace cpl {
                         if (!bRead) {
                             const DWORD e = GetLastError();
                             retCode = static_cast<INT32>(e);
-                            log_error("[x] InternetReadFile failed: [%lu] %s", e, FormatError(e).data());
+                            LOG_F(ERROR, "[x] InternetReadFile failed: [%lu] %s", e, FormatError(e).data());
                             goto __ERROR__;
                         } else {
                             buffer[dwBytesRead] = 0;
@@ -181,7 +197,7 @@ namespace cpl {
                     if (r00 != ERROR_SUCCESS) {
                         const auto e = api->WS32.WSAGetLastError();
                         retCode = e;
-                        log_error("[x] WSAStartup failed %d: %s", e, FormatError(e).data());
+                        LOG_F(ERROR, "[x] WSAStartup failed %d: %s", e, FormatError(e).data());
                         goto __ERROR__;
                     }
                 }
@@ -192,7 +208,7 @@ namespace cpl {
                 if (SendSocket == INVALID_SOCKET) {
                     const int e = api->WS32.WSAGetLastError();
                     retCode = e;
-                    log_error("[x] socket failed %d: %s", e, FormatError(e).data());
+                    LOG_F(ERROR, "[x] socket failed %d: %s", e, FormatError(e).data());
                     goto __ERROR__;
                 }
                 //---------------------------------------------
@@ -215,7 +231,7 @@ namespace cpl {
                     if (r00 == SOCKET_ERROR) {
                         const int e = api->WS32.WSAGetLastError();
                         retCode = e;
-                        log_error("[x] sendto failed %d: %s", e, FormatError(e).data());
+                        LOG_F(ERROR, "[x] sendto failed %d: %s", e, FormatError(e).data());
                         goto __ERROR__;
                     }
                 }
@@ -229,7 +245,7 @@ namespace cpl {
                     if (r00 == SOCKET_ERROR) {
                         const int e = api->WS32.WSAGetLastError();
                         retCode = e;
-                        log_error("[x] closesocket failed %d: %s", e, FormatError(e).data());
+                        LOG_F(ERROR, "[x] closesocket failed %d: %s", e, FormatError(e).data());
                     }
                 }
                 if (initWSAData) {
@@ -334,8 +350,100 @@ namespace cpl {
                     return retCode;
                 }
             }
+#endif // 0 (legacy win32::network disabled)
         }
     }
+
+    // ========================================================================
+    // cpl::sys::network::wrapper::UDPSend — provider-injectable encrypted UDP
+    //
+    // Unlike the legacy cpl::win32::network::wrapper::SendTo which hard-codes
+    // the RC4-based Win32Crypto, UDPSend takes a cpl::crypto::stl::ISync *
+    // (typically a cpl::naion::Client, which does CSM AEAD) and encrypts the
+    // payload through it before transmission. This makes the crypto layer
+    // swappable and aligns with the naion CSM path.
+    //
+    // The CSM client packet is self-describing, so no extra framing is added.
+    // ========================================================================
+    namespace sys {
+        namespace network {
+            namespace wrapper {
+                // UDPSend — provider-injectable encrypted UDP send.
+                //
+                // Unlike the legacy cpl::win32::network::wrapper::SendTo (which
+                // hard-codes the RC4-based Win32Crypto), UDPSend takes a
+                // cpl::crypto::stl::ISync * (typically a cpl::naion::Client,
+                // which performs CSM AEAD) and encrypts the payload through it
+                // before transmission. The CSM client packet is self-describing,
+                // so no extra framing is added.
+                //
+                // cpl has ZERO logging dependency: errors are returned as Win32
+                // codes; the optional `tag` is for the caller's own diagnostics.
+                // Winsock access goes through the NEW api system
+                // (cpl::sys::api::API::Instance().Ws2_32) so this function is
+                // self-contained and does not pull in legacy win32::network code.
+                inline INT32 UDPSend(
+                    _In_ const string &host,
+                    _In_ const uint16_t port,
+                    _In_ const Stream &data,
+                    _In_ cpl::crypto::stl::ISync *provider,
+                    _In_opt_ const char *tag = nullptr
+                ) {
+                    (void) tag; // reserved for caller diagnostics; cpl does not log.
+
+                    if (nullptr == provider) {
+                        return ERROR_INVALID_PARAMETER;
+                    }
+
+                    // Encrypt via the injected provider (naion CSM when a
+                    // naion::Client is supplied). Encrypt returns Result<Stream>.
+                    const auto enc = provider->Encrypt(data);
+                    if (!enc) {
+                        return ERROR_ENCRYPTION_FAILED;
+                    }
+
+                    // Defensive size guard: the CSM client packet must fit one
+                    // UDP datagram (1024). Client::Encrypt already enforces the
+                    // payload budget, so a violation here indicates a logic error.
+                    const auto &cipher = enc.value();
+                    if (cipher.size() > 1024U) {
+                        return ERROR_INCORRECT_SIZE;
+                    }
+                    if (cipher.empty()) {
+                        return ERROR_INVALID_PARAMETER;
+                    }
+
+                    const auto &api = cpl::sys::api::API::Instance();
+                    auto s = INVALID_SOCKET;
+                    INT32 retCode = ERROR_SUCCESS;
+
+                    s = api.Ws2_32.socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+                    if (s == INVALID_SOCKET) {
+                        return api.Ws2_32.WSAGetLastError();
+                    }
+
+                    sockaddr_in dst{};
+                    dst.sin_family = AF_INET;
+                    dst.sin_port = api.Ws2_32.htons(port);
+                    dst.sin_addr.s_addr = api.Ws2_32.inet_addr(host.c_str());
+
+                    const auto sent = api.Ws2_32.sendto(
+                        s,
+                        reinterpret_cast<const char *>(cipher.data()),
+                        static_cast<int>(cipher.size()),
+                        0,
+                        reinterpret_cast<const sockaddr *>(&dst),
+                        sizeof(dst));
+                    if (sent == SOCKET_ERROR) {
+                        retCode = api.Ws2_32.WSAGetLastError();
+                    }
+
+                    (void) api.Ws2_32.closesocket(s);
+                    return retCode;
+                }
+            } // namespace wrapper
+        } // namespace network
+    } // namespace sys
 }
 
 #endif //CPL_NETWORK_HPP_FLICKER_MIGHTY_BLOSSOM_GLIDE_RHYTHM_PULSE_TURBULENCE_ECHO
