@@ -10,7 +10,7 @@
 using namespace std;
 
 namespace cpl {
-    namespace win32 {
+    namespace sys {
         namespace service {
             // 安装服务
             inline int32_t Install (

@@ -15,7 +15,7 @@ using namespace std;
 // before exit(), so we route them through OutputDebugStringA — the same native
 // debug sink sys.hpp's LOG_D uses. No new dependency is introduced.
 namespace cpl {
-    namespace win32 {
+    namespace sys {
         namespace thread {
             inline void logFatal(_In_ const char *tpl, ...) {
                 char buf[512]{};
@@ -29,10 +29,10 @@ namespace cpl {
         }
     }
 }
-#define log_fatal cpl::win32::thread::logFatal
+#define log_fatal cpl::sys::thread::logFatal
 
 namespace cpl {
-    namespace win32 {
+    namespace sys {
         namespace thread {
             typedef DWORD (CALLBACK *CallbackFunction)(LPVOID args);
 

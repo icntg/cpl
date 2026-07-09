@@ -13,7 +13,7 @@
 #include <chrono>
 #include <thread>
 
-using namespace cpl::win32::thread;
+using namespace cpl::sys::thread;
 
 namespace {
 // Shared counter incremented by the worker thread.
