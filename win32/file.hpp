@@ -13,15 +13,18 @@ namespace cpl {
         namespace file {
             class Errors final {
             public:
-                static constexpr int64_t base = static_cast<int64_t>(0x20) << 32;
-                static constexpr cpl::Error::CodeDef Open = {base | 1};
-                static constexpr cpl::Error::CodeDef Read = {base | 2};
-                static constexpr cpl::Error::CodeDef Seek = {base | 3};
-                static constexpr cpl::Error::CodeDef Tell = {base | 4};
-                static constexpr cpl::Error::CodeDef CreateFileA = {base | 5};
-                static constexpr cpl::Error::CodeDef CreateFileMappingA = {base | 6};
-                static constexpr cpl::Error::CodeDef MapViewOfFile = {base | 7};
-                static constexpr cpl::Error::CodeDef UnmapViewOfFile = {base | 8};
+                // C++11 note: ODR-safe via scoped enum (see cpl::Error note).
+                enum : int64_t {
+                    base = static_cast<int64_t>(0x20) << 32,
+                    Open = base | 1,
+                    Read = base | 2,
+                    Seek = base | 3,
+                    Tell = base | 4,
+                    CreateFileA = base | 5,
+                    CreateFileMappingA = base | 6,
+                    MapViewOfFile = base | 7,
+                    UnmapViewOfFile = base | 8,
+                };
             };
 
             inline Result<int64_t> GetFileSize(const std::string &filename) {
@@ -48,7 +51,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Error::FileOpen, es.value<>());
+                    return MakeErr(Error::FileOpen, es.value());
                 }
                 if (0 != _fseeki64(fp, 0, SEEK_END)) {
                     auto es = strings::Format(
@@ -58,7 +61,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Errors::Seek, es.value<>());
+                    return MakeErr(Errors::Seek, es.value());
                 }
                 const auto size = _ftelli64(fp);
                 if (size < 0) {
@@ -70,7 +73,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Errors::Tell, es.value<>());
+                    return MakeErr(Errors::Tell, es.value());
                 }
                 return size;
             }
@@ -96,7 +99,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Errors::Open, es.value<>());
+                    return MakeErr(Errors::Open, es.value());
                 }
 
                 if (0 != _fseeki64(fp, 0, SEEK_END)) {
@@ -108,7 +111,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Errors::Seek, es.value<>());
+                    return MakeErr(Errors::Seek, es.value());
                 }
 
                 const auto fileSize = _ftelli64(fp);
@@ -122,7 +125,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Errors::Tell, es.value<>());
+                    return MakeErr(Errors::Tell, es.value());
                 }
                 if (0 != _fseeki64(fp, 0, SEEK_SET)) {
                     auto es = strings::Format(
@@ -132,7 +135,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Errors::Seek, es.value<>());
+                    return MakeErr(Errors::Seek, es.value());
                 }
 
                 content.resize(static_cast<size_t>(fileSize));
@@ -152,7 +155,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Errors::Read, es.value<>());
+                    return MakeErr(Errors::Read, es.value());
                 }
                 return content;
             }
@@ -188,7 +191,7 @@ namespace cpl {
                         if (!es) {
                             return Err(es.error().Append(CPL_FILE_AND_LINE));
                         }
-                        return MakeErr(Errors::CreateFileA, es.value<>());
+                        return MakeErr(Errors::CreateFileA, es.value());
                     }
 
                     MappingHandle = CreateFileMappingA(
@@ -210,7 +213,7 @@ namespace cpl {
                         if (!es) {
                             return Err(es.error().Append(CPL_FILE_AND_LINE));
                         }
-                        return MakeErr(Errors::CreateFileMappingA, es.value<>());
+                        return MakeErr(Errors::CreateFileMappingA, es.value());
                     }
 
                     MappedFileAddress = MapViewOfFile(
@@ -231,7 +234,7 @@ namespace cpl {
                         if (!es) {
                             return Err(es.error().Append(CPL_FILE_AND_LINE));
                         }
-                        return MakeErr(Errors::MapViewOfFile, es.value<>());
+                        return MakeErr(Errors::MapViewOfFile, es.value());
                     }
                     return 0;
                 }
@@ -250,7 +253,7 @@ namespace cpl {
                             if (!es) {
                                 return Err(es.error().Append(CPL_FILE_AND_LINE));
                             }
-                            return MakeErr(Errors::UnmapViewOfFile, es.value<>());
+                            return MakeErr(Errors::UnmapViewOfFile, es.value());
                         }
                         MappedFileAddress = nullptr;
                         MappedFileSize = 0;

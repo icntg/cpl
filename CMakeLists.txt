@@ -53,7 +53,10 @@ if(CPL_BUILD_WIN32_TESTS AND WIN32)
     list(APPEND CPL_TEST_SOURCES
         test/test_win32_utility.cpp
         test/test_sys_crypto.cpp
-        test/test_sys_network.cpp)
+        test/test_sys_network.cpp
+        test/test_thread.cpp
+        test/test_file.cpp
+        test/test_service.cpp)
 endif()
 
 # ── 构建可执行 ────────────────────────────────────────────────────────────

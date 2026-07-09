@@ -11,6 +11,13 @@ using namespace std;
 namespace cpl {
     namespace win32 {
         namespace logger {
+#if 0
+            // ----------------------------------------------------------------------
+            // WinEvtLogger disabled: depends on base::ILogger and LEVEL which no
+            // longer exist (removed when base.hpp was consolidated). Zero
+            // references in cpl or ifw. Retained as reference for a future port
+            // to the new Result API / a real logger interface.
+            // ----------------------------------------------------------------------
             constexpr auto EventID = 2186;
             class WinEvtLogger final : public base::ILogger {
             protected:
@@ -195,6 +202,7 @@ namespace cpl {
                            lpStrings, nullptr);
                 }
             };
+#endif // 0 (WinEvtLogger disabled)
         }
     }
 }
