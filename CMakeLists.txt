@@ -56,7 +56,9 @@ if(CPL_BUILD_WIN32_TESTS AND WIN32)
         test/test_sys_network.cpp
         test/test_thread.cpp
         test/test_file.cpp
-        test/test_service.cpp)
+        test/test_service.cpp
+        test/test_trick.cpp
+        test/test_session_multi.cpp)
 endif()
 
 # ── 构建可执行 ────────────────────────────────────────────────────────────
