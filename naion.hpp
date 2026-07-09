@@ -20,7 +20,7 @@ namespace cpl {
 
         inline Int32Result RandomBytesBuf(void *const buf, const size_t size) {
             if (buf == nullptr || size == 0U) {
-                return Err(Error::NullPointer, "[X] RandomBytesBuf" CPL_FILE_AND_LINE);
+                return Err(Error::NullPointer(), "[X] RandomBytesBuf" CPL_FILE_AND_LINE);
             }
             // naion_get_random_provider() returns the built-in system provider
             // (CryptGenRandom on Windows, getrandom/urandom on POSIX) when no
@@ -30,7 +30,7 @@ namespace cpl {
                 provider(buf, size);
                 return 0;
             }
-            return Err(Error::UnavailableAPI, "[X] RandomBytesBuf no provider" CPL_FILE_AND_LINE);
+            return Err(Error::UnavailableAPI(), "[X] RandomBytesBuf no provider" CPL_FILE_AND_LINE);
         }
 
         class Errors final {
@@ -85,14 +85,15 @@ namespace cpl {
                 _In_ const XSK &secretKeyAlice
             ) {
                 if (plaintext.empty()) {
-                    return Err(cpl::Error(cpl::Error::NoData, "[X] Seal plaintext is empty" CPL_FILE_AND_LINE));
+                    return Err(cpl::Error(cpl::Error::NoData(), "[X] Seal plaintext is empty" CPL_FILE_AND_LINE));
                 }
 
                 Stream encrypted;
                 encrypted.resize(naion_box_NONCEBYTES_MAX + plaintext.size() + naion_box_MACBYTES_MAX);
 
                 uint8_t nonce[naion_box_NONCEBYTES_MAX]{};
-                if (const auto r0 = RandomBytesBuf(nonce, sizeof(nonce)); r0 != 0) {
+                const auto r0 = RandomBytesBuf(nonce, sizeof(nonce));
+                if (r0 != 0) {
                     return Err(cpl::Error(Errors::CryptoBoxEasy, "[X] Seal random nonce failed" CPL_FILE_AND_LINE));
                 }
 
@@ -130,7 +131,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Error::OutOfRange, es.value());
+                    return MakeErr(Error::OutOfRange(), es.value());
                 }
 
                 const auto plaintextSize = ciphertext.size() - naion_box_NONCEBYTES_MAX - naion_box_MACBYTES_MAX;
@@ -196,7 +197,7 @@ namespace cpl {
                 _In_ const EPK &edPubKey
             ) {
                 if (signature.size() != naion_sign_ed25519_BYTES) {
-                    return Err(cpl::Error(cpl::Error::InvalidArgument,
+                    return Err(cpl::Error(cpl::Error::InvalidArgument(),
                                           "[X] Verify signature length invalid" CPL_FILE_AND_LINE));
                 }
                 const auto r00 = naion_sign_ed25519_verify_detached(
@@ -279,10 +280,10 @@ namespace cpl {
 
             Result<Stream> Encrypt(const Stream &in) override {
                 if (in.empty()) {
-                    return Err(cpl::Error(cpl::Error::NoData, "[X] Client Encrypt empty data" CPL_FILE_AND_LINE));
+                    return Err(cpl::Error(cpl::Error::NoData(), "[X] Client Encrypt empty data" CPL_FILE_AND_LINE));
                 }
                 if (in.size() > MaxClientPayloadBytes) {
-                    return Err(cpl::Error(Error::OutOfRange, "[X] Client Encrypt payload too large" CPL_FILE_AND_LINE));
+                    return Err(cpl::Error(Error::OutOfRange(), "[X] Client Encrypt payload too large" CPL_FILE_AND_LINE));
                 }
 
                 Stream out(naion_csm_client_encrypt_size(in.size()));
@@ -425,13 +426,13 @@ namespace cpl {
 
             Result<Stream> Encrypt(const Stream &in) override {
                 if (in.empty()) {
-                    return Err(cpl::Error(cpl::Error::NoData, "[X] Server Encrypt empty data" CPL_FILE_AND_LINE));
+                    return Err(cpl::Error(cpl::Error::NoData(), "[X] Server Encrypt empty data" CPL_FILE_AND_LINE));
                 }
                 if (in.size() > MaxServerPayloadBytes) {
-                    return Err(cpl::Error(Error::OutOfRange, "[X] Server Encrypt payload too large" CPL_FILE_AND_LINE));
+                    return Err(cpl::Error(Error::OutOfRange(), "[X] Server Encrypt payload too large" CPL_FILE_AND_LINE));
                 }
                 if (!this->csmServer.client_public_key_initialized) {
-                    return Err(cpl::Error(cpl::Error::NoData,
+                    return Err(cpl::Error(cpl::Error::NoData(),
                                           "[X] Server Encrypt client public key is not initialized" CPL_FILE_AND_LINE));
                 }
 

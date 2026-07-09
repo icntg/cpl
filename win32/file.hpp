@@ -48,7 +48,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Error::FileOpen, es.value<>());
+                    return MakeErr(Error::FileOpen(), es.value<>());
                 }
                 if (0 != _fseeki64(fp, 0, SEEK_END)) {
                     auto es = strings::Format(

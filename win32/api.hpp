@@ -1843,7 +1843,7 @@ namespace AdvAPI32 {
                     return 0;
                 }
             }
-            return Err(cpl::Error(cpl::Error::UnavailableAPI, "load module or function failed"));
+            return Err(cpl::Error(cpl::Error::UnavailableAPI(), "load module or function failed"));
         }
 
         Int32Result Unload() override {
@@ -2137,7 +2137,7 @@ namespace WinINet {
                     return 0;
                 }
             }
-            return Err(cpl::Error(cpl::Error::UnavailableAPI, "load module or function failed"));
+            return Err(cpl::Error(cpl::Error::UnavailableAPI(), "load module or function failed"));
         }
 
         Int32Result Unload() override {
@@ -2413,7 +2413,7 @@ namespace NtDLL {
                     return 0;
                 }
             }
-            return Err(cpl::Error(cpl::Error::UnavailableAPI, "load module or function failed"));
+            return Err(cpl::Error(cpl::Error::UnavailableAPI(), "load module or function failed"));
         }
 
         Int32Result Unload() override {
@@ -2519,7 +2519,7 @@ namespace Kernel32 {
                     return 0;
                 }
             }
-            return Err(cpl::Error(cpl::Error::UnavailableAPI, "load module or function failed"));
+            return Err(cpl::Error(cpl::Error::UnavailableAPI(), "load module or function failed"));
         }
 
         Int32Result Unload() override {
@@ -2642,7 +2642,7 @@ namespace MsImg32 {
                     return 0;
                 }
             }
-            return Err(cpl::Error(cpl::Error::UnavailableAPI, "load module or function failed"));
+            return Err(cpl::Error(cpl::Error::UnavailableAPI(), "load module or function failed"));
         }
 
         Int32Result Unload() override {

@@ -49,7 +49,13 @@
 
 namespace cpl {
 
-    inline std::unique_ptr<bool> gDebug{};
+    // gDebug: global debug flag. C++11 has no inline variables (C++17), so we
+    // expose it via an inline accessor returning a function-local static ref
+    // (Meyers singleton) — ODR-safe across TUs. Usage changes: gDebug -> gDebug().
+    inline std::unique_ptr<bool> &gDebug() {
+        static std::unique_ptr<bool> v{};
+        return v;
+    }
 
     // Minimal error dispatch model
     class Error {
@@ -69,13 +75,19 @@ namespace cpl {
             uint8_t u8[8];
         };
 
-        static constexpr CodeDef NullPointer = {ENOENT};
-        static constexpr CodeDef NoData = {ENODATA};
-        static constexpr CodeDef OutOfRange = {ERANGE};
-        static constexpr CodeDef OutOfMemory = {ENOMEM};
-        static constexpr CodeDef InvalidArgument = {EINVAL};
-        static constexpr CodeDef UnavailableAPI = {EFAULT};
-        static constexpr CodeDef FileOpen = {EROFS};
+        // C++11 note: static constexpr data members ODR-used (passed by value
+        // to the Error ctor below) require an out-of-class definition, which is
+        // problematic for a header-only lib (and -O0 links fail). Exposing them
+        // as constexpr accessor functions avoids the ODR issue entirely while
+        // preserving compile-time evaluation. Usage unchanged at call sites:
+        //   Error::NullPointer()  ->  Error::NullPointer()
+        static constexpr CodeDef NullPointer() { return CodeDef{ENOENT}; }
+        static constexpr CodeDef NoData() { return CodeDef{ENODATA}; }
+        static constexpr CodeDef OutOfRange() { return CodeDef{ERANGE}; }
+        static constexpr CodeDef OutOfMemory() { return CodeDef{ENOMEM}; }
+        static constexpr CodeDef InvalidArgument() { return CodeDef{EINVAL}; }
+        static constexpr CodeDef UnavailableAPI() { return CodeDef{EFAULT}; }
+        static constexpr CodeDef FileOpen() { return CodeDef{EROFS}; }
 
         CodeDef Code{};
         std::string Reason{};
@@ -286,8 +298,15 @@ namespace cpl {
         }
 
         namespace log {
-            // for LOG_D
-            inline void (*exLoggerFunc) (const std::string& out) = nullptr;
+            // exLoggerFunc: pluggable logger sink (for LOG_D). C++11 has no inline
+            // variables, so expose via inline accessor (Meyers singleton).
+            // Usage: exLoggerFunc -> exLoggerFunc(); assignment exLoggerFunc() = fn;
+            //        invocation exLoggerFunc()(msg).
+            typedef void (*ExLoggerFunc)(const std::string &out);
+            inline ExLoggerFunc &exLoggerFunc() {
+                static ExLoggerFunc v = nullptr;
+                return v;
+            }
 
             template<typename Callable>
             void once(Callable &&logFunc) {

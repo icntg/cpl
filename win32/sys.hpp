@@ -179,7 +179,7 @@ namespace cpl {
                                 return Err(es.error().Append(CPL_FILE_AND_LINE));
                             }
                             LOG_D("%s\n", es.value().data());
-                            return MakeErr(Error::UnavailableAPI, es.value());
+                            return MakeErr(Error::UnavailableAPI(), es.value());
                         }
                         this->hModule = hMod;
                         auto es = cpl::strings::Format("[#] module [%s] is loaded already" CPL_FILE_AND_LINE,
@@ -917,7 +917,7 @@ namespace cpl {
         }
 
         inline void LOG_D(const char *tpl, ...) {
-            if (gDebug && !*gDebug) {
+            if (gDebug() && !*gDebug()) {
                 return;
             }
             va_list args;
@@ -928,8 +928,8 @@ namespace cpl {
 
             if (r) {
                 OutputDebugStringA(r.value().data());
-                if (base::log::exLoggerFunc) {
-                    base::log::exLoggerFunc(r.value());
+                if (base::log::exLoggerFunc()) {
+                    base::log::exLoggerFunc()(r.value());
                 }
             } else {
                 std::string es{};
@@ -938,8 +938,8 @@ namespace cpl {
                 sprintf_s(b, 128, "0x%lx%lx", e.Code.x32.h, e.Code.x32.l);
                 es = std::string{"[X] LOG_D / Format Error ["} + b + "][" + e.Reason + "]";
                 OutputDebugStringA(es.c_str());
-                if (base::log::exLoggerFunc) {
-                    base::log::exLoggerFunc(es);
+                if (base::log::exLoggerFunc()) {
+                    base::log::exLoggerFunc()(es);
                 }
             }
         }

@@ -4,7 +4,7 @@ project(cpl C CXX)
 # ── 语言标准 ──────────────────────────────────────────────────────────────
 # C++17: base.hpp 使用 inline 变量 (gDebug / exLoggerFunc)，C++11 无此特性。
 # C11  : naion.h 为可移植 C，C11 兼容更好。
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_C_STANDARD 11)

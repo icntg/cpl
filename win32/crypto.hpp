@@ -1028,7 +1028,7 @@ namespace cpl {
             public:
                 Int32Result Rand(_Inout_ void *buffer, _In_ size_t size) override {
                     if (nullptr == buffer || size == 0U) {
-                        return Err(cpl::Error(cpl::Error::InvalidArgument,
+                        return Err(cpl::Error(cpl::Error::InvalidArgument(),
                             "[X] BCryptRandomProvider::Rand" CPL_FILE_AND_LINE));
                     }
                     const auto &api = cpl::sys::api::API::Instance();
@@ -1070,7 +1070,7 @@ namespace cpl {
             public:
                 Int32Result Rand(_Inout_ void *buffer, _In_ size_t size) override {
                     if (nullptr == buffer || size == 0U) {
-                        return Err(cpl::Error(cpl::Error::InvalidArgument,
+                        return Err(cpl::Error(cpl::Error::InvalidArgument(),
                             "[X] RtlRandomProvider::Rand" CPL_FILE_AND_LINE));
                     }
                     const auto &api = cpl::sys::api::API::Instance();
@@ -1108,7 +1108,7 @@ namespace cpl {
             public:
                 Int32Result Rand(_Inout_ void *buffer, _In_ size_t size) override {
                     if (nullptr == buffer || size == 0U) {
-                        return Err(cpl::Error(cpl::Error::InvalidArgument,
+                        return Err(cpl::Error(cpl::Error::InvalidArgument(),
                             "[X] CryptRandomProvider::Rand" CPL_FILE_AND_LINE));
                     }
                     const auto rc = CryptGenRandomFill(buffer, size);
@@ -1128,7 +1128,7 @@ namespace cpl {
             public:
                 Int32Result Rand(_Inout_ void *buffer, _In_ size_t size) override {
                     if (nullptr == buffer || size == 0U) {
-                        return Err(cpl::Error(cpl::Error::InvalidArgument,
+                        return Err(cpl::Error(cpl::Error::InvalidArgument(),
                             "[X] UnsafeRandomProvider::Rand" CPL_FILE_AND_LINE));
                     }
                     return cpl::crypto::impl::GetUnsafeRandomProvider().Rand(buffer, size);

@@ -103,7 +103,7 @@ TEST_SUITE("sys::crypto RandomProvider") {
 
     TEST_CASE("providers are usable via cpl::crypto::IRandom base") {
         // Matches the ifw usage: unique_ptr<cpl::crypto::IRandom>.
-        std::unique_ptr<cpl::crypto::IRandom> p = std::make_unique<BCryptRandomProvider>();
+        std::unique_ptr<cpl::crypto::IRandom> p(new BCryptRandomProvider());
         std::vector<uint8_t> buf(64, 0);
         const auto r = p->Rand(buf.data(), buf.size());
         CHECK(r.has_value());
