@@ -34,7 +34,7 @@ namespace cpl {
         public:
             static Result<std::string> Hexlify(_In_ const void *in, _In_ const size_t size) noexcept {
                 if (!in || size == 0) {
-                    return cpl::Err(cpl::Error(cpl::Error::NullPointer(), CPL_FILE_AND_LINE));
+                    return cpl::Err(cpl::Error(cpl::Error::NullPointer, CPL_FILE_AND_LINE));
                 }
                 std::string out{};
                 const auto pin = static_cast<const uint8_t *>(in);
@@ -46,7 +46,7 @@ namespace cpl {
                     } else if (ch1 <= 15) {
                         out.push_back(static_cast<char>(ch1 - 10 + 'A'));
                     } else {
-                        return cpl::Err(cpl::Error(cpl::Error::OutOfRange(), CPL_FILE_AND_LINE));
+                        return cpl::Err(cpl::Error(cpl::Error::OutOfRange, CPL_FILE_AND_LINE));
                     }
                     const unsigned char ch0 = ch & 0xf;
                     if (ch0 <= 9) {
@@ -54,7 +54,7 @@ namespace cpl {
                     } else if (ch0 <= 15) {
                         out.push_back(static_cast<char>(ch0 - 10 + 'A'));
                     } else {
-                        return cpl::Err(cpl::Error(cpl::Error::OutOfRange(), CPL_FILE_AND_LINE));
+                        return cpl::Err(cpl::Error(cpl::Error::OutOfRange, CPL_FILE_AND_LINE));
                     }
                 }
                 return out;
@@ -66,7 +66,7 @@ namespace cpl {
 
             static Result<Stream> UnHexlify(_In_ const char *in) {
                 if (!in) {
-                    return cpl::Err(cpl::Error(cpl::Error::NullPointer(), CPL_FILE_AND_LINE));
+                    return cpl::Err(cpl::Error(cpl::Error::NullPointer, CPL_FILE_AND_LINE));
                 }
                 const auto n = strlen(in);
                 if (n % 2 != 0) {
@@ -86,7 +86,7 @@ namespace cpl {
                         } else if ('a' <= c && c <= 'f') {
                             w = c - 'a' + 10;
                         } else {
-                            return Err(cpl::Error(cpl::Error::InvalidArgument(), "[X] UnHexlify invalid character" CPL_FILE_AND_LINE));
+                            return Err(cpl::Error(cpl::Error::InvalidArgument, "[X] UnHexlify invalid character" CPL_FILE_AND_LINE));
                         }
                         v = static_cast<uint8_t>((v << 4) | (w & 0xf));
                     }
@@ -152,7 +152,7 @@ namespace cpl {
         public:
             static Result<std::string> Base64Encode(_In_ const void *in, _In_ const size_t size) {
                 if (!in || size == 0) {
-                    return cpl::Err(cpl::Error(cpl::Error::NullPointer(), CPL_FILE_AND_LINE));
+                    return cpl::Err(cpl::Error(cpl::Error::NullPointer, CPL_FILE_AND_LINE));
                 }
                 static auto self = Base64();
                 std::string out{};
@@ -209,7 +209,7 @@ namespace cpl {
 
             static Result<Stream> Base64Decode(_In_ const char *in) {
                 if (!in) {
-                    return cpl::Err(cpl::Error(cpl::Error::NullPointer(), CPL_FILE_AND_LINE));
+                    return cpl::Err(cpl::Error(cpl::Error::NullPointer, CPL_FILE_AND_LINE));
                 }
                 auto in_len = strlen(in);
                 const auto ir = checkBase64Characters(in);
@@ -221,7 +221,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Error::OutOfRange(), es.value());
+                    return MakeErr(Error::OutOfRange, es.value());
                 }
                 if (ir > 0) {
                     auto es = cpl::strings::Format(
@@ -231,7 +231,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Error::OutOfRange(), es.value());
+                    return MakeErr(Error::OutOfRange, es.value());
                 }
                 static auto self = Base64();
                 static auto table = self.base64_reverse_table();
@@ -336,7 +336,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Error::OutOfRange(), es.value());
+                    return MakeErr(Error::OutOfRange, es.value());
                 }
                 Stream out{};
                 out.clear();
@@ -371,7 +371,7 @@ namespace cpl {
                     if (!es) {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
-                    return MakeErr(Error::OutOfRange(), es.value());
+                    return MakeErr(Error::OutOfRange, es.value());
                 }
                 out.resize(idx);
                 for (size_t i = 0; i < idx; i++) {
@@ -386,7 +386,7 @@ namespace cpl {
              */
             static Result<std::tuple<int64_t, uint8_t> > Decode(_In_ const Stream &stream) {
                 if (stream.empty()) {
-                    return cpl::Err(cpl::Error(cpl::Error::NoData(), CPL_FILE_AND_LINE));
+                    return cpl::Err(cpl::Error(cpl::Error::NoData, CPL_FILE_AND_LINE));
                 }
                 int64_t decodedLength{};
                 uint8_t nBytes{};
@@ -408,13 +408,13 @@ namespace cpl {
                                                "Invalid UTF-8 length prefix" CPL_FILE_AND_LINE));
                 }
                 if (stream.size() < nBytes) {
-                    return cpl::Err(cpl::Error(cpl::Error::OutOfRange(),
+                    return cpl::Err(cpl::Error(cpl::Error::OutOfRange,
                                                "Insufficient bytes for length field" CPL_FILE_AND_LINE));
                 }
                 int64_t tail = 0;
                 for (size_t i = 1; i < nBytes; i++) {
                     if (stream[i] >> 6 != 2) {
-                        return cpl::Err(cpl::Error(cpl::Error::InvalidArgument(), "Invalid continuation byte"));
+                        return cpl::Err(cpl::Error(cpl::Error::InvalidArgument, "Invalid continuation byte"));
                     }
                     tail = (tail << 6) | (stream[i] & 0x3f);
                 }
@@ -433,7 +433,7 @@ namespace cpl {
         ) {
             static constexpr auto delta = 256;
             if (tpl == nullptr) {
-                return cpl::Err(cpl::Error(cpl::Error::NullPointer(), CPL_FILE_AND_LINE));
+                return cpl::Err(cpl::Error(cpl::Error::NullPointer, CPL_FILE_AND_LINE));
             }
             std::vector<char> buffer{};
             size_t len = strlen(tpl) + delta;
@@ -466,7 +466,7 @@ namespace cpl {
         ) {
             static constexpr auto delta = 256;
             if (tpl == nullptr) {
-                return cpl::Err(cpl::Error(cpl::Error::NullPointer(), CPL_FILE_AND_LINE));
+                return cpl::Err(cpl::Error(cpl::Error::NullPointer, CPL_FILE_AND_LINE));
             }
             std::vector<wchar_t> buffer{};
             size_t len = wcslen(tpl) + delta; // initial buffer size
@@ -681,7 +681,7 @@ namespace cpl {
 
         inline Result<const char *> StrInStr(const char *mainStr, const char *subStr) {
             if (!mainStr || !subStr) {
-                return cpl::Err(cpl::Error(cpl::Error::NullPointer(), CPL_FILE_AND_LINE));
+                return cpl::Err(cpl::Error(cpl::Error::NullPointer, CPL_FILE_AND_LINE));
             }
             auto *cp = mainStr;
             const char *s1{}, *s2{};
@@ -699,7 +699,7 @@ namespace cpl {
                 }
                 cp++;
             }
-            return Err(cpl::Error(cpl::Error::NoData(), "[X] StrInStr substring not found" CPL_FILE_AND_LINE));
+            return Err(cpl::Error(cpl::Error::NoData, "[X] StrInStr substring not found" CPL_FILE_AND_LINE));
         }
 
         inline std::string ReplaceAll(const std::string &str, const std::string &from, const std::string &to) {

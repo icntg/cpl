@@ -179,7 +179,7 @@ namespace cpl {
                                 return Err(es.error().Append(CPL_FILE_AND_LINE));
                             }
                             LOG_D("%s\n", es.value().data());
-                            return MakeErr(Error::UnavailableAPI(), es.value());
+                            return MakeErr(Error::UnavailableAPI, es.value());
                         }
                         this->hModule = hMod;
                         auto es = cpl::strings::Format("[#] module [%s] is loaded already" CPL_FILE_AND_LINE,

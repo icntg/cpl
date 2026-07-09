@@ -28,16 +28,17 @@ namespace cpl {
     namespace crypto {
         class Errors final {
         public:
-            // C++11 note: static constexpr data members that are ODR-used (passed
-            // by value to Error below) require an out-of-class definition, which
-            // is problematic for a header-only lib. Exposing them as constexpr
-            // accessor functions avoids the ODR issue entirely while preserving
-            // compile-time evaluation. Usage unchanged: Errors::SHA256_() etc.
-            static constexpr int64_t base = static_cast<int64_t>(2) << 32;
-            static constexpr cpl::Error::CodeDef SHA256_() { return cpl::Error::CodeDef{static_cast<int64_t>(base | 1)}; }
-            static constexpr cpl::Error::CodeDef HMAC256_() { return cpl::Error::CodeDef{static_cast<int64_t>(base | 2)}; }
-            static constexpr cpl::Error::CodeDef LENGTH_ENCODE_() { return cpl::Error::CodeDef{static_cast<int64_t>(base | 3)}; }
-            static constexpr cpl::Error::CodeDef CREATE_RC4_() { return cpl::Error::CodeDef{static_cast<int64_t>(base | 0x20)}; }
+            // C++11 note: ODR-safe via scoped enum (see Error::NullPointer note).
+            // Used as plain values: Err(Errors::SHA256_, "...").
+            // base = 2<<32 = 0x100000000; enumerator initializers must be
+            // constant expressions, so we inline the base value directly.
+            enum : int64_t {
+                base = static_cast<int64_t>(2) << 32,
+                SHA256_ = base | 1,
+                HMAC256_ = base | 2,
+                LENGTH_ENCODE_ = base | 3,
+                CREATE_RC4_ = base | 0x20,
+            };
         };
 
         class IRandom {
@@ -123,7 +124,7 @@ namespace cpl {
             public:
                 Int32Result Rand(_Inout_ void *buffer, _In_ const size_t size) override {
                     if (!buffer || size <= 0) {
-                        return cpl::Err(cpl::Error(cpl::Error::NullPointer(), CPL_FILE_AND_LINE));
+                        return cpl::Err(cpl::Error(cpl::Error::NullPointer, CPL_FILE_AND_LINE));
                     }
                     // unsafe random generator.
                     // params from
@@ -175,7 +176,7 @@ namespace cpl {
                             });
                             heapPointer = malloc(sizeof(uint64_t));
                             if (nullptr == heapPointer) {
-                                return cpl::Err(cpl::Error(cpl::Error::OutOfMemory(), CPL_FILE_AND_LINE));
+                                return cpl::Err(cpl::Error(cpl::Error::OutOfMemory, CPL_FILE_AND_LINE));
                             }
                             uint64_t heapAddress{};
                             uint64_t heapValue{};
@@ -265,7 +266,7 @@ namespace cpl {
             public:
                 static Result<RC4> Create(_In_ void *key, const _In_ size_t size) {
                     if (nullptr == key || size == 0) {
-                        return cpl::Err(cpl::Error(cpl::Error::NullPointer(), CPL_FILE_AND_LINE));
+                        return cpl::Err(cpl::Error(cpl::Error::NullPointer, CPL_FILE_AND_LINE));
                     }
                     auto instance = RC4();
                     instance.KSA(static_cast<uint8_t *>(key), size);
@@ -277,10 +278,10 @@ namespace cpl {
                     _Out_ void *outBuffer, _Out_ size_t &outSize,
                     _In_ const void *inBuffer, const _In_ size_t inSize) override {
                     if (!outBuffer || !inBuffer || inSize == 0) {
-                        return cpl::Err(cpl::Error(cpl::Error::NullPointer(), CPL_FILE_AND_LINE));
+                        return cpl::Err(cpl::Error(cpl::Error::NullPointer, CPL_FILE_AND_LINE));
                     }
                     if (!initialized) {
-                        return cpl::Err(cpl::Error(cpl::Error::InvalidArgument(), "RC4 not initialized"));
+                        return cpl::Err(cpl::Error(cpl::Error::InvalidArgument, "RC4 not initialized"));
                     }
                     outSize = inSize;
                     PRGA(static_cast<uint8_t *>(outBuffer), static_cast<const uint8_t *>(inBuffer), inSize);
@@ -422,7 +423,7 @@ namespace cpl {
                 Int32Result revert(void *hash, const size_t size) const {
                     const auto hash_ = static_cast<uint8_t *>(hash);
                     if (size != SHA256_BYTES) {
-                        return cpl::Err(cpl::Error(cpl::Error::OutOfRange(), "[X] hash.size() != 32" CPL_FILE_AND_LINE));
+                        return cpl::Err(cpl::Error(cpl::Error::OutOfRange, "[X] hash.size() != 32" CPL_FILE_AND_LINE));
                     }
                     // SHA uses big endian byte ordering
                     // Revert all bytes
@@ -454,7 +455,7 @@ namespace cpl {
 
                 Int32Result Update(_In_ const void *buffer, const _In_ size_t size) override {
                     if (!buffer || size == 0) {
-                        return cpl::Err(cpl::Error(cpl::Error::InvalidArgument(), CPL_FILE_AND_LINE));
+                        return cpl::Err(cpl::Error(cpl::Error::InvalidArgument, CPL_FILE_AND_LINE));
                     }
 
                     const auto data = static_cast<const uint8_t *>(buffer);
@@ -473,11 +474,11 @@ namespace cpl {
 
                 Int32Result Summary(_Out_ void *buffer, _Inout_ size_t &size) override {
                     if (nullptr == buffer) {
-                        return cpl::Err(cpl::Error(cpl::Error::NullPointer(), CPL_FILE_AND_LINE));
+                        return cpl::Err(cpl::Error(cpl::Error::NullPointer, CPL_FILE_AND_LINE));
                     }
                     if (size < SHA256_BYTES) {
                         size = SHA256_BYTES;
-                        return cpl::Err(cpl::Error(cpl::Error::OutOfRange(), "Output buffer too small"));
+                        return cpl::Err(cpl::Error(cpl::Error::OutOfRange, "Output buffer too small"));
                     }
                     this->pad();
                     auto *data = static_cast<uint8_t *>(buffer);
@@ -522,7 +523,7 @@ namespace cpl {
 
                 Int32Result init(const void *key, const size_t keyLen) {
                     if (key == nullptr || keyLen == 0) {
-                        return cpl::Err(cpl::Error(cpl::Error::InvalidArgument(), "Invalid HMAC key"));
+                        return cpl::Err(cpl::Error(cpl::Error::InvalidArgument, "Invalid HMAC key"));
                     }
                     std::array<uint8_t, BLOCK_LEN> innerKey{};
                     std::array<uint8_t, BLOCK_LEN> outerKey{};
@@ -532,7 +533,7 @@ namespace cpl {
                         size_t outSize = BLOCK_LEN;
                         const auto r00 = sha256(hashedKey.data(), outSize, key, keyLen);
                         if (!r00) {
-                            return cpl::Err(cpl::Error(Errors::SHA256_(), CPL_FILE_AND_LINE));
+                            return cpl::Err(cpl::Error(Errors::SHA256_, CPL_FILE_AND_LINE));
                         }
                         memcpy(innerKey.data(), hashedKey.data(), hashedKey.size());
                         memcpy(outerKey.data(), hashedKey.data(), hashedKey.size());
@@ -573,7 +574,7 @@ namespace cpl {
                         return cpl::Err(initError);
                     }
                     if (!buffer || size == 0) {
-                        return cpl::Err(cpl::Error(cpl::Error::InvalidArgument(), CPL_FILE_AND_LINE));
+                        return cpl::Err(cpl::Error(cpl::Error::InvalidArgument, CPL_FILE_AND_LINE));
                     }
                     auto r = innerSHA256.Update(buffer, size);
                     if (!r) {
@@ -588,10 +589,10 @@ namespace cpl {
                         return cpl::Err(initError);
                     }
                     if (!buffer) {
-                        return cpl::Err(cpl::Error(cpl::Error::NullPointer(), CPL_FILE_AND_LINE));
+                        return cpl::Err(cpl::Error(cpl::Error::NullPointer, CPL_FILE_AND_LINE));
                     }
                     if (!updated) {
-                        return cpl::Err(cpl::Error(cpl::Error::NoData(), CPL_FILE_AND_LINE));
+                        return cpl::Err(cpl::Error(cpl::Error::NoData, CPL_FILE_AND_LINE));
                     }
 
                     uint8_t inner_hash[32];
@@ -655,7 +656,7 @@ namespace cpl {
                     _In_ const void *inBuffer, const _In_ size_t inSize
                 ) override {
                     if (nullptr == inBuffer || nullptr == outBuffer) {
-                        return cpl::Err(cpl::Error(cpl::Error::NullPointer(), CPL_FILE_AND_LINE));
+                        return cpl::Err(cpl::Error(cpl::Error::NullPointer, CPL_FILE_AND_LINE));
                     }
                     // struct: signE, signL, nonce, length, encrypted
                     Stream encKey{}, signKey{};
@@ -682,7 +683,7 @@ namespace cpl {
                             nonce.data(), nonce.size(),
                             key.data(), key.size());
                         if (!r00) {
-                            return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), CPL_FILE_AND_LINE));
+                            return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, CPL_FILE_AND_LINE));
                         }
                         encKey.resize(size);
                         size = SHA256::SHA256_BYTES;
@@ -692,7 +693,7 @@ namespace cpl {
                             nonce.data(), nonce.size()
                         );
                         if (!r01) {
-                            return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), CPL_FILE_AND_LINE));
+                            return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, CPL_FILE_AND_LINE));
                         }
                         signKey.resize(size);
                     }
@@ -700,7 +701,7 @@ namespace cpl {
                     {
                         const auto r00 = cpl::codec::Length::Encode(static_cast<int64_t>(inSize));
                         if (!r00) {
-                            return cpl::Err(cpl::Error(crypto::Errors::LENGTH_ENCODE_(), CPL_FILE_AND_LINE));
+                            return cpl::Err(cpl::Error(crypto::Errors::LENGTH_ENCODE_, CPL_FILE_AND_LINE));
                         }
                         length = r00.value();
                     }
@@ -711,21 +712,21 @@ namespace cpl {
                         signL.resize(size); {
                             const auto r = instance.Update(nonce.data(), nonce.size());
                             if (!r) {
-                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), CPL_FILE_AND_LINE));
+                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, CPL_FILE_AND_LINE));
                             }
                         } {
                             const auto r = instance.Update(length.data(), length.size());
                             if (!r) {
-                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), CPL_FILE_AND_LINE));
+                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, CPL_FILE_AND_LINE));
                             }
                         } {
                             const auto r = instance.Summary(signL.data(), size);
                             if (!r) {
-                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), CPL_FILE_AND_LINE));
+                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, CPL_FILE_AND_LINE));
                             }
                         }
                         if (size != SHA256::SHA256_BYTES) {
-                            return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), "Unexpected HMAC output size"));
+                            return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, "Unexpected HMAC output size"));
                         }
                         // Truncate to the on-wire signature length (matches Decrypt).
                         signL.resize(SIGN_L_BYTES_LENGTH);
@@ -734,7 +735,7 @@ namespace cpl {
                     {
                         auto _rc4 = RC4::Create(encKey.data(), encKey.size());
                         if (!_rc4) {
-                            return Err(Errors::CREATE_RC4_(), CPL_FILE_AND_LINE);
+                            return Err(Errors::CREATE_RC4_, CPL_FILE_AND_LINE);
                         }
                         auto rc4 = _rc4.value();
                         size_t size{};
@@ -753,31 +754,31 @@ namespace cpl {
                         signE.resize(SHA256::SHA256_BYTES); {
                             const auto r = h.Update(signL.data(), signL.size());
                             if (!r) {
-                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), CPL_FILE_AND_LINE));
+                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, CPL_FILE_AND_LINE));
                             }
                         } {
                             const auto r = h.Update(nonce.data(), nonce.size());
                             if (!r) {
-                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), CPL_FILE_AND_LINE));
+                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, CPL_FILE_AND_LINE));
                             }
                         } {
                             const auto r = h.Update(length.data(), length.size());
                             if (!r) {
-                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), CPL_FILE_AND_LINE));
+                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, CPL_FILE_AND_LINE));
                             }
                         } {
                             const auto r = h.Update(encrypted.data(), encrypted.size());
                             if (!r) {
-                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), CPL_FILE_AND_LINE));
+                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, CPL_FILE_AND_LINE));
                             }
                         } {
                             const auto r = h.Summary(signE.data(), size);
                             if (!r) {
-                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), CPL_FILE_AND_LINE));
+                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, CPL_FILE_AND_LINE));
                             }
                         }
                         if (size != SHA256::SHA256_BYTES) {
-                            return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), "Unexpected HMAC output size"));
+                            return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, "Unexpected HMAC output size"));
                         }
                         // Truncate to the on-wire signature length (matches Decrypt).
                         signE.resize(SIGN_E_BYTES_LENGTH);
@@ -826,14 +827,14 @@ namespace cpl {
                     _In_ const void *inBuffer, const _In_ size_t inSize) override {
                     // 1. Validate arguments
                     if (nullptr == inBuffer || nullptr == outBuffer) {
-                        return cpl::Err(cpl::Error(cpl::Error::NullPointer(), CPL_FILE_AND_LINE));
+                        return cpl::Err(cpl::Error(cpl::Error::NullPointer, CPL_FILE_AND_LINE));
                     }
 
                     // Check minimum input size
                     constexpr size_t minInputSize = SIGN_E_BYTES_LENGTH + SIGN_L_BYTES_LENGTH +
                                                     NONCE_BYTES_LENGTH;
                     if (inSize < minInputSize) {
-                        return cpl::Err(cpl::Error(cpl::Error::InvalidArgument(), "Input data too short"));
+                        return cpl::Err(cpl::Error(cpl::Error::InvalidArgument, "Input data too short"));
                     }
 
                     // 2. Split input fields
@@ -858,25 +859,25 @@ namespace cpl {
                     size_t nBytes{};
                     const auto r00 = cpl::codec::Length::Decode(Stream(p + idx, p + idx + inSize - idx));
                     if (!r00) {
-                        return cpl::Err(cpl::Error(crypto::Errors::LENGTH_ENCODE_(), CPL_FILE_AND_LINE));
+                        return cpl::Err(cpl::Error(crypto::Errors::LENGTH_ENCODE_, CPL_FILE_AND_LINE));
                     }
                     decodedLen = static_cast<uint64_t>(std::get<0>(r00.value()));
                     nBytes = std::get<1>(r00.value());
                     if (idx + nBytes > inSize) {
-                        return cpl::Err(cpl::Error(cpl::Error::InvalidArgument(), "Invalid length encoding"));
+                        return cpl::Err(cpl::Error(cpl::Error::InvalidArgument, "Invalid length encoding"));
                     }
                     length.assign(p + idx, p + idx + nBytes);
                     idx += nBytes;
 
                     // Validate decoded size
                     if (decodedLen > inSize) {
-                        return cpl::Err(cpl::Error(cpl::Error::InvalidArgument(), "Invalid data size"));
+                        return cpl::Err(cpl::Error(cpl::Error::InvalidArgument, "Invalid data size"));
                     }
 
                     // 4. Validate output buffer size
                     if (outSize < decodedLen) {
                         outSize = static_cast<size_t>(decodedLen);
-                        return cpl::Err(cpl::Error(cpl::Error::OutOfRange(), "Output buffer too small"));
+                        return cpl::Err(cpl::Error(cpl::Error::OutOfRange, "Output buffer too small"));
                     }
 
                     // Extract encrypted payload
@@ -894,7 +895,7 @@ namespace cpl {
                             nonce.data(), nonce.size(),
                             key.data(), key.size());
                         if (!r01) {
-                            return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), CPL_FILE_AND_LINE));
+                            return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, CPL_FILE_AND_LINE));
                         }
                         encKey.resize(size);
                         size = SHA256::SHA256_BYTES;
@@ -904,7 +905,7 @@ namespace cpl {
                             nonce.data(), nonce.size()
                         );
                         if (!r02) {
-                            return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), CPL_FILE_AND_LINE));
+                            return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, CPL_FILE_AND_LINE));
                         }
                         signKey.resize(size);
                     }
@@ -917,27 +918,27 @@ namespace cpl {
                         computedSignL.resize(size); {
                             const auto r = instance.Update(nonce.data(), nonce.size());
                             if (!r) {
-                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), CPL_FILE_AND_LINE));
+                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, CPL_FILE_AND_LINE));
                             }
                         } {
                             const auto r = instance.Update(length.data(), length.size());
                             if (!r) {
-                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), CPL_FILE_AND_LINE));
+                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, CPL_FILE_AND_LINE));
                             }
                         } {
                             const auto r = instance.Summary(computedSignL.data(), size);
                             if (!r) {
-                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), CPL_FILE_AND_LINE));
+                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, CPL_FILE_AND_LINE));
                             }
                         }
                         if (size != SHA256::SHA256_BYTES) {
-                            return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), "Unexpected HMAC output size"));
+                            return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, "Unexpected HMAC output size"));
                         }
                         computedSignL.resize(SIGN_L_BYTES_LENGTH);
 
                         // Compare signatures
                         if (computedSignL != signL) {
-                            return cpl::Err(cpl::Error(cpl::Error::InvalidArgument(),
+                            return cpl::Err(cpl::Error(cpl::Error::InvalidArgument,
                                                        "Signature verification failed (signL)"));
                         }
                     }
@@ -950,37 +951,37 @@ namespace cpl {
                         computedSignE.resize(SHA256::SHA256_BYTES); {
                             const auto r = h.Update(signL.data(), signL.size());
                             if (!r) {
-                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), CPL_FILE_AND_LINE));
+                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, CPL_FILE_AND_LINE));
                             }
                         } {
                             const auto r = h.Update(nonce.data(), nonce.size());
                             if (!r) {
-                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), CPL_FILE_AND_LINE));
+                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, CPL_FILE_AND_LINE));
                             }
                         } {
                             const auto r = h.Update(length.data(), length.size());
                             if (!r) {
-                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), CPL_FILE_AND_LINE));
+                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, CPL_FILE_AND_LINE));
                             }
                         } {
                             const auto r = h.Update(encrypted.data(), encrypted.size());
                             if (!r) {
-                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), CPL_FILE_AND_LINE));
+                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, CPL_FILE_AND_LINE));
                             }
                         } {
                             const auto r = h.Summary(computedSignE.data(), size);
                             if (!r) {
-                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), CPL_FILE_AND_LINE));
+                                return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, CPL_FILE_AND_LINE));
                             }
                         }
                         if (size != SHA256::SHA256_BYTES) {
-                            return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), "Unexpected HMAC output size"));
+                            return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, "Unexpected HMAC output size"));
                         }
                         computedSignE.resize(SIGN_E_BYTES_LENGTH);
 
                         // Compare signatures
                         if (computedSignE != signE) {
-                            return cpl::Err(cpl::Error(cpl::Error::InvalidArgument(),
+                            return cpl::Err(cpl::Error(cpl::Error::InvalidArgument,
                                                        "Signature verification failed (signE)"));
                         }
                     }
@@ -989,7 +990,7 @@ namespace cpl {
                     {
                         auto _rc4 = RC4::Create(encKey.data(), encKey.size());
                         if (!_rc4) {
-                            return Err(Errors::CREATE_RC4_(), CPL_FILE_AND_LINE);
+                            return Err(Errors::CREATE_RC4_, CPL_FILE_AND_LINE);
                         }
                         auto rc4 = _rc4.value();
                         size_t decryptedSize{};
@@ -1052,7 +1053,7 @@ namespace cpl {
                     buffer.resize(size);
                     const auto r00 = crypto::impl::sha256(buffer.data(), size, data.data(), data.size());
                     if (!r00 || size != 32) {
-                        return cpl::Err(cpl::Error(crypto::Errors::SHA256_(), CPL_FILE_AND_LINE));
+                        return cpl::Err(cpl::Error(crypto::Errors::SHA256_, CPL_FILE_AND_LINE));
                     }
                     buffer.resize(size);
                     return buffer;
@@ -1065,7 +1066,7 @@ namespace cpl {
                     const auto r00 = crypto::impl::hmac256(buffer.data(), size, key.data(), key.size(), data.data(),
                                                            data.size());
                     if (!r00 || size != 32) {
-                        return cpl::Err(cpl::Error(crypto::Errors::HMAC256_(), CPL_FILE_AND_LINE));
+                        return cpl::Err(cpl::Error(crypto::Errors::HMAC256_, CPL_FILE_AND_LINE));
                     }
                     buffer.resize(size);
                     return buffer;

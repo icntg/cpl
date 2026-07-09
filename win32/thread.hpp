@@ -3,11 +3,33 @@
 
 #include <process.h>
 #include <windows.h>
+#include <cstdio>
 
 #include "api.hpp"
-#include "../../ccl-del/vendor/logger/log.h"
 
 using namespace std;
+
+// cpl has zero external-logger dependency. The legacy thread.hpp used
+// ../../ccl-del/vendor/logger/log.h (a path outside this repo that no longer
+// exists). Fatal thread-creation failures still need to surface a diagnostic
+// before exit(), so we route them through OutputDebugStringA — the same native
+// debug sink sys.hpp's LOG_D uses. No new dependency is introduced.
+namespace cpl {
+    namespace win32 {
+        namespace thread {
+            inline void logFatal(_In_ const char *tpl, ...) {
+                char buf[512]{};
+                va_list args;
+                va_start(args, tpl);
+                _vsnprintf(buf, sizeof(buf) - 1, tpl, args);
+                va_end(args);
+                OutputDebugStringA(buf);
+                OutputDebugStringA("\n");
+            }
+        }
+    }
+}
+#define log_fatal cpl::win32::thread::logFatal
 
 namespace cpl {
     namespace win32 {

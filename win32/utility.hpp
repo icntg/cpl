@@ -97,7 +97,7 @@ namespace cpl {
                     DWORD ppid = static_cast<DWORD>(pbi.InheritedFromUniqueProcessId);
 #endif
                     if (pid == 0 || ppid == 0) {
-                        return Err(cpl::Error(Error::InvalidArgument(), "[X] GetParentPID invalid pid" CPL_FILE_AND_LINE));
+                        return Err(cpl::Error(Error::InvalidArgument, "[X] GetParentPID invalid pid" CPL_FILE_AND_LINE));
                     }
                     return ppid;
                 }
@@ -189,7 +189,7 @@ namespace cpl {
                     const auto &s = p.value();
                     const auto n = s.rfind('\\');
                     if (n == std::string::npos) {
-                        return Err(cpl::Error(Error::NoData(), "[X] GetCurrentDir no separator" CPL_FILE_AND_LINE));
+                        return Err(cpl::Error(Error::NoData, "[X] GetCurrentDir no separator" CPL_FILE_AND_LINE));
                     }
                     return s.substr(0, n);
                 }

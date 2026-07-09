@@ -75,19 +75,23 @@ namespace cpl {
             uint8_t u8[8];
         };
 
-        // C++11 note: static constexpr data members ODR-used (passed by value
-        // to the Error ctor below) require an out-of-class definition, which is
-        // problematic for a header-only lib (and -O0 links fail). Exposing them
-        // as constexpr accessor functions avoids the ODR issue entirely while
-        // preserving compile-time evaluation. Usage unchanged at call sites:
-        //   Error::NullPointer()  ->  Error::NullPointer()
-        static constexpr CodeDef NullPointer() { return CodeDef{ENOENT}; }
-        static constexpr CodeDef NoData() { return CodeDef{ENODATA}; }
-        static constexpr CodeDef OutOfRange() { return CodeDef{ERANGE}; }
-        static constexpr CodeDef OutOfMemory() { return CodeDef{ENOMEM}; }
-        static constexpr CodeDef InvalidArgument() { return CodeDef{EINVAL}; }
-        static constexpr CodeDef UnavailableAPI() { return CodeDef{EFAULT}; }
-        static constexpr CodeDef FileOpen() { return CodeDef{EROFS}; }
+        // C++11 note: ODR-safe error code constants. We use a scoped enum
+        // (enum : int64_t) rather than static constexpr data members. Enum
+        // enumerators are pure compile-time constants with no address, so they
+        // never trigger ODR-use link errors — critical for a header-only lib
+        // where static constexpr members would need out-of-class definitions
+        // (impossible across multiple TUs). Call sites use them as plain
+        // values, identical to the old static-member syntax:
+        //   Err(Error::InvalidArgument, "...")   // unchanged, no parentheses
+        enum : int64_t {
+            NullPointer = ENOENT,
+            NoData = ENODATA,
+            OutOfRange = ERANGE,
+            OutOfMemory = ENOMEM,
+            InvalidArgument = EINVAL,
+            UnavailableAPI = EFAULT,
+            FileOpen = EROFS,
+        };
 
         CodeDef Code{};
         std::string Reason{};

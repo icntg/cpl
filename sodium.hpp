@@ -45,7 +45,7 @@ namespace cpl {
                 _In_ const XSK &secretKeyAlice
             ) {
                 if (plaintext.empty()) {
-                    return Err(cpl::Error(cpl::Error::NoData(), "[X] Seal plaintext is empty" CPL_FILE_AND_LINE));
+                    return Err(cpl::Error(cpl::Error::NoData, "[X] Seal plaintext is empty" CPL_FILE_AND_LINE));
                 }
 
                 Stream encrypted;
@@ -85,7 +85,7 @@ namespace cpl {
                         "[X] Open ciphertext size [%lu] is too short" CPL_FILE_AND_LINE,
                         static_cast<uint32_t>(ciphertext.size())
                     ).value_or("[X] format failed" CPL_FILE_AND_LINE);
-                    return Err(cpl::Error(cpl::Error::OutOfRange(), es.c_str()));
+                    return Err(cpl::Error(cpl::Error::OutOfRange, es.c_str()));
                 }
 
                 const auto plaintextSize = ciphertext.size() - crypto_box_NONCEBYTES - crypto_box_MACBYTES;
@@ -151,7 +151,7 @@ namespace cpl {
                 _In_ const EPK &edPubKey
             ) {
                 if (signature.size() != crypto_sign_BYTES) {
-                    return Err(cpl::Error(cpl::Error::InvalidArgument(),
+                    return Err(cpl::Error(cpl::Error::InvalidArgument,
                                           "[X] Verify signature length invalid" CPL_FILE_AND_LINE));
                 }
                 const auto r00 = crypto_sign_verify_detached(
@@ -205,7 +205,7 @@ namespace cpl {
 
             Result<Stream> Encrypt(const Stream &in) override {
                 if (in.empty()) {
-                    return Err(cpl::Error(cpl::Error::NoData(), "[X] Client Encrypt empty data" CPL_FILE_AND_LINE));
+                    return Err(cpl::Error(cpl::Error::NoData, "[X] Client Encrypt empty data" CPL_FILE_AND_LINE));
                 }
 
                 XPK serverXpk{};
@@ -266,7 +266,7 @@ namespace cpl {
                         static_cast<uint32_t>(in.size()),
                         static_cast<uint32_t>(MIN_SIZE)
                     ).value_or("[X] format failed" CPL_FILE_AND_LINE);
-                    return Err(cpl::Error(cpl::Error::OutOfRange(), es.c_str()));
+                    return Err(cpl::Error(cpl::Error::OutOfRange, es.c_str()));
                 }
 
                 const Stream signature{in.data(), in.data() + crypto_sign_BYTES};
@@ -347,7 +347,7 @@ namespace cpl {
                         static_cast<uint32_t>(in.size()),
                         static_cast<uint32_t>(MIN_SIZE)
                     ).value_or("[X] format failed" CPL_FILE_AND_LINE);
-                    return Err(cpl::Error(cpl::Error::OutOfRange(), es.c_str()));
+                    return Err(cpl::Error(cpl::Error::OutOfRange, es.c_str()));
                 }
 
                 XSK serverX25519SK{};
@@ -406,10 +406,10 @@ namespace cpl {
 
             Result<Stream> Encrypt(const Stream &in) override {
                 if (in.empty()) {
-                    return Err(cpl::Error(cpl::Error::NoData(), "[X] Server Encrypt empty data" CPL_FILE_AND_LINE));
+                    return Err(cpl::Error(cpl::Error::NoData, "[X] Server Encrypt empty data" CPL_FILE_AND_LINE));
                 }
                 if (!this->ed25519PublicKeyClientInitialized) {
-                    return Err(cpl::Error(cpl::Error::NoData(),
+                    return Err(cpl::Error(cpl::Error::NoData,
                                           "[X] Server Encrypt client public key is not initialized" CPL_FILE_AND_LINE));
                 }
 

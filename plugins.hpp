@@ -234,7 +234,7 @@ namespace cpl {
                 }
                 return cfg;
             } catch (...) {
-                return cpl::MakeErr(cpl::Error::InvalidArgument(), "[X] plugin runtime cfg parse failed" CPL_FILE_AND_LINE);
+                return cpl::MakeErr(cpl::Error::InvalidArgument, "[X] plugin runtime cfg parse failed" CPL_FILE_AND_LINE);
             }
         }
 
@@ -246,32 +246,32 @@ namespace cpl {
             string path = {}
         ) {
             if (fileData == nullptr || caPublicKey == nullptr) {
-                return cpl::MakeErr(cpl::Error::NullPointer(), "[X] plugin package input is null" CPL_FILE_AND_LINE);
+                return cpl::MakeErr(cpl::Error::NullPointer, "[X] plugin package input is null" CPL_FILE_AND_LINE);
             }
             cpl::naion::EPK ca{};
             if (caPublicKeySize != ca.size()) {
-                return cpl::MakeErr(cpl::Error::InvalidArgument(), "[X] plugin CA public key size invalid" CPL_FILE_AND_LINE);
+                return cpl::MakeErr(cpl::Error::InvalidArgument, "[X] plugin CA public key size invalid" CPL_FILE_AND_LINE);
             }
 
             constexpr size_t minPackageSize = sizeof(IfwPluginTrailer) + IFW_PLUGIN_SIGNATURE_BYTES;
             if (fileSize <= minPackageSize) {
-                return cpl::MakeErr(cpl::Error::OutOfRange(), "[X] plugin package is too small" CPL_FILE_AND_LINE);
+                return cpl::MakeErr(cpl::Error::OutOfRange, "[X] plugin package is too small" CPL_FILE_AND_LINE);
             }
 
             const size_t signatureOffset = fileSize - IFW_PLUGIN_SIGNATURE_BYTES;
             const size_t trailerOffset = signatureOffset - sizeof(IfwPluginTrailer);
             const auto *trailer = reinterpret_cast<const IfwPluginTrailer *>(fileData + trailerOffset);
             if (std::memcmp(trailer->magic, IFW_PLUGIN_TRAILER_MAGIC, sizeof(trailer->magic)) != 0) {
-                return cpl::MakeErr(cpl::Error::InvalidArgument(), "[X] plugin trailer magic mismatch" CPL_FILE_AND_LINE);
+                return cpl::MakeErr(cpl::Error::InvalidArgument, "[X] plugin trailer magic mismatch" CPL_FILE_AND_LINE);
             }
             if (trailer->package_version != IFW_PLUGIN_PACKAGE_VERSION) {
-                return cpl::MakeErr(cpl::Error::InvalidArgument(), "[X] plugin package version mismatch" CPL_FILE_AND_LINE);
+                return cpl::MakeErr(cpl::Error::InvalidArgument, "[X] plugin package version mismatch" CPL_FILE_AND_LINE);
             }
             if (trailer->cfg_offset >= trailerOffset || trailer->cfg_size == 0) {
-                return cpl::MakeErr(cpl::Error::OutOfRange(), "[X] plugin cfg offset/size invalid" CPL_FILE_AND_LINE);
+                return cpl::MakeErr(cpl::Error::OutOfRange, "[X] plugin cfg offset/size invalid" CPL_FILE_AND_LINE);
             }
             if (static_cast<size_t>(trailer->cfg_offset) + static_cast<size_t>(trailer->cfg_size) != trailerOffset) {
-                return cpl::MakeErr(cpl::Error::OutOfRange(), "[X] plugin cfg range does not match trailer offset" CPL_FILE_AND_LINE);
+                return cpl::MakeErr(cpl::Error::OutOfRange, "[X] plugin cfg range does not match trailer offset" CPL_FILE_AND_LINE);
             }
 
             std::memcpy(ca.data(), caPublicKey, ca.size());
@@ -290,7 +290,7 @@ namespace cpl {
             try {
                 (void)nlohmann::json::parse(configJson);
             } catch (...) {
-                return cpl::MakeErr(cpl::Error::InvalidArgument(), "[X] plugin cfg is not valid JSON" CPL_FILE_AND_LINE);
+                return cpl::MakeErr(cpl::Error::InvalidArgument, "[X] plugin cfg is not valid JSON" CPL_FILE_AND_LINE);
             }
 
             PackageInfo out{};
@@ -316,31 +316,31 @@ namespace cpl {
 #if defined(_MSC_VER)
             const auto rOpen = fopen_s(&fp, pluginPath.data(), "rb");
             if (rOpen != 0 || fp == nullptr) {
-                return cpl::MakeErr(rOpen == 0 ? cpl::Error::FileOpen().i64 : rOpen, "[X] fopen_s plugin failed" CPL_FILE_AND_LINE);
+                return cpl::MakeErr(rOpen == 0 ? cpl::Error::FileOpen.i64 : rOpen, "[X] fopen_s plugin failed" CPL_FILE_AND_LINE);
             }
 #else
             fp = std::fopen(pluginPath.data(), "rb");
             if (fp == nullptr) {
-                return cpl::MakeErr(cpl::Error::FileOpen(), "[X] fopen plugin failed" CPL_FILE_AND_LINE);
+                return cpl::MakeErr(cpl::Error::FileOpen, "[X] fopen plugin failed" CPL_FILE_AND_LINE);
             }
 #endif
 
             if (std::fseek(fp, 0, SEEK_END) != 0) {
-                return cpl::MakeErr(cpl::Error::OutOfRange(), "[X] fseek plugin end failed" CPL_FILE_AND_LINE);
+                return cpl::MakeErr(cpl::Error::OutOfRange, "[X] fseek plugin end failed" CPL_FILE_AND_LINE);
             }
             const auto fileSizeLong = std::ftell(fp);
             if (fileSizeLong <= 0) {
-                return cpl::MakeErr(cpl::Error::OutOfRange(), "[X] ftell plugin failed" CPL_FILE_AND_LINE);
+                return cpl::MakeErr(cpl::Error::OutOfRange, "[X] ftell plugin failed" CPL_FILE_AND_LINE);
             }
             if (std::fseek(fp, 0, SEEK_SET) != 0) {
-                return cpl::MakeErr(cpl::Error::OutOfRange(), "[X] fseek plugin begin failed" CPL_FILE_AND_LINE);
+                return cpl::MakeErr(cpl::Error::OutOfRange, "[X] fseek plugin begin failed" CPL_FILE_AND_LINE);
             }
 
             const auto fileSize = static_cast<size_t>(fileSizeLong);
             std::vector<uint8_t> fileData(fileSize);
             const auto rRead = std::fread(fileData.data(), 1, fileData.size(), fp);
             if (rRead != fileData.size()) {
-                return cpl::MakeErr(cpl::Error::OutOfRange(), "[X] fread plugin failed" CPL_FILE_AND_LINE);
+                return cpl::MakeErr(cpl::Error::OutOfRange, "[X] fread plugin failed" CPL_FILE_AND_LINE);
             }
 
             return LoadPackageConfigFromBytes(
