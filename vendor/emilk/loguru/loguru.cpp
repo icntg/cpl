@@ -129,6 +129,9 @@
 	#define WIN32_LEAN_AND_MEAN
 	#define NOMINMAX
 	#include <windows.h>
+	// _SH_DENYNO (used by _fsopen below) is declared in <share.h>; MSVC pulls it
+	// in transitively but MinGW does not, so include it explicitly. [cpl patch]
+	#include <share.h>
 #endif
 
 #ifndef LOGURU_PTLS_NAMES
