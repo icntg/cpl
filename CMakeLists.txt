@@ -27,6 +27,7 @@ set(CPL_TEST_SOURCES
     test/test_strings.cpp
     test/test_crypto.cpp
     test/test_naion.cpp
+    test/test_plugins.cpp
 )
 
 # naion 单头库实现 TU (STB 风格：恰好一个 TU 定义 NAION_IMPLEMENTATION)。

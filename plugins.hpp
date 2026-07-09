@@ -316,7 +316,7 @@ namespace cpl {
 #if defined(_MSC_VER)
             const auto rOpen = fopen_s(&fp, pluginPath.data(), "rb");
             if (rOpen != 0 || fp == nullptr) {
-                return cpl::MakeErr(rOpen == 0 ? cpl::Error::FileOpen.i64 : rOpen, "[X] fopen_s plugin failed" CPL_FILE_AND_LINE);
+                return cpl::MakeErr(cpl::Error::FileOpen, "[X] fopen_s plugin failed" CPL_FILE_AND_LINE);
             }
 #else
             fp = std::fopen(pluginPath.data(), "rb");
