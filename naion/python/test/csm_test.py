@@ -14,13 +14,16 @@ DEFAULT_CL_PATH = r"C:\Program Files\Microsoft Visual Studio\18\Community\VC\Too
 DEFAULT_VCVARS_PATH = r"C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars32.bat"
 
 
-MODULE_ROOT = Path(__file__).resolve().parents[1]
-TEST_ROOT = Path(__file__).resolve().parent
+MODULE_ROOT = Path(__file__).resolve().parents[1]  # python/ (where naion.py lives)
+TEST_ROOT = Path(__file__).resolve().parent        # python/test/
+NAION_ROOT = Path(__file__).resolve().parents[2]   # naion/ (repo root)
 BIN_ROOT = TEST_ROOT / "bin"
 PYTHON_PEER_SCRIPT = Path(__file__).resolve()
 GO_PEER_EXE = BIN_ROOT / "go_peer.exe"
 C_PEER_EXE = BIN_ROOT / "c_peer.exe"
-C_PEER_SOURCE = TEST_ROOT / "c_peer.c"
+# C and Go peers live outside python/ (under naion/test and naion/go/test):
+C_PEER_SOURCE = NAION_ROOT / "test" / "c_peer.c"
+GO_PEER_SOURCE = NAION_ROOT / "go" / "test" / "go_peer" / "main.go"
 
 if str(MODULE_ROOT) not in sys.path:
     sys.path.insert(0, str(MODULE_ROOT))
@@ -56,7 +59,10 @@ def run_process(command: list[str], cwd: Path | None = None) -> subprocess.Compl
 
 def build_go_peer(go_exe: str) -> None:
     BIN_ROOT.mkdir(parents=True, exist_ok=True)
-    run_process([go_exe, "build", "-o", str(GO_PEER_EXE), "./test/go_peer"], cwd=MODULE_ROOT)
+    # Go module now lives under naion/go/; build the go_peer from there so the
+    # "naion" package resolves. "./test/go_peer" is relative to go/.
+    run_process([go_exe, "build", "-o", str(GO_PEER_EXE), "./test/go_peer"],
+                cwd=str(NAION_ROOT / "go"))
 
 
 def build_c_peer(cl_path: str, vcvars_path: str) -> None:
@@ -68,7 +74,8 @@ def build_c_peer(cl_path: str, vcvars_path: str) -> None:
                 "@echo off",
                 f'call "{vcvars_path}" >nul',
                 "if errorlevel 1 exit /b 1",
-                f'"{cl_path}" /nologo /O2 /TC /D_CRT_SECURE_NO_WARNINGS /I"{MODULE_ROOT}" "{C_PEER_SOURCE}" /Fe:"{C_PEER_EXE}"',
+                # naion.h lives at the naion repo root (NAION_ROOT), not python/.
+                f'"{cl_path}" /nologo /O2 /TC /D_CRT_SECURE_NO_WARNINGS /I"{NAION_ROOT}" "{C_PEER_SOURCE}" /Fe:"{C_PEER_EXE}"',
             ]
         ),
         encoding="utf-8",
