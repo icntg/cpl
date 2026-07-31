@@ -438,7 +438,146 @@ namespace cpl {
                         retCode = api.Ws2_32.WSAGetLastError();
                     }
 
+
                     (void) api.Ws2_32.closesocket(s);
+                    return retCode;
+                }
+
+                // ==============================================================
+                // HTTPRequest — 自包含的 WinINet HTTP 客户端
+                // --------------------------------------------------------------
+                // 供 ifw 的 HTTP 长轮询（心跳 + 配置热重载触发）和 HTTP 上报复用。
+                //
+                // 设计与 UDPSend 对齐：
+                //   - 完全自包含：通过 cpl::sys::api::API::Instance().WinINet 访问
+                //     动态加载的函数，不依赖 loguru，不依赖已废弃的旧代码。
+                //   - 返回 Win32 / WinINet 错误码，调用方据此重试或降级。
+                //
+                // 长轮询关键点：
+                //   - 必须通过 InternetSetOptionA 设置接收超时（默认仅 30s），
+                //     否则长轮询会因服务端 hold 请求而提前超时失败。
+                //   - 每次调用新建会话并关闭所有句柄，简单可靠（下轮若需复用
+                //     keep-alive 可在调用方维护会话）。
+                //
+                // 契约（本轮约定最简）：
+                //   POST url，请求体=心跳；服务端 hold 住，配置变才返回。
+                //   收到响应即视为"配置已更新"，调用方重读 .jwt。
+                // ==============================================================
+                inline INT32 HTTPRequest(
+                    _In_ const string &url,
+                    _In_ const Stream &body,
+                    _Out_ Stream &response,
+                    _In_ const char *method = "POST",
+                    _In_ const uint32_t recvTimeoutMs = 65000u
+                ) {
+                    response.clear();
+                    const auto &inet = cpl::sys::api::API::Instance().WinINet;
+
+                    // 1) 必需函数检查（InternetSetOptionA 缺失会导致超时不可控，
+                    //    视为不可用）
+                    if (!inet.InternetOpenA || !inet.InternetConnectA
+                        || !inet.HttpOpenRequestA || !inet.HttpSendRequestA
+                        || !inet.InternetReadFile || !inet.InternetCloseHandle
+                        || !inet.InternetCrackUrlA || !inet.InternetSetOptionA) {
+                        return ERROR_INVALID_FUNCTION; // WinINet 未就绪
+                    }
+
+                    // 2) 解析 URL（InternetCrackUrlA 第一次调用拿长度，第二次填缓冲）
+                    URL_COMPONENTSA uc{};
+                    uc.dwStructSize = sizeof(uc);
+                    uc.dwSchemeLength = (DWORD)-1;
+                    uc.dwHostNameLength = (DWORD)-1;
+                    uc.dwUrlPathLength = (DWORD)-1;
+                    uc.dwUserNameLength = (DWORD)-1;
+                    uc.dwPasswordLength = (DWORD)-1;
+                    if (!inet.InternetCrackUrlA(url.c_str(), static_cast<DWORD>(url.size()), 0, &uc)) {
+                        return static_cast<INT32>(GetLastError());
+                    }
+                    if (uc.nScheme != INTERNET_SCHEME_HTTP) {
+                        // 本轮契约仅支持 http://，https 留待需要时加
+                        return ERROR_NOT_SUPPORTED;
+                    }
+                    if (uc.nPort == 0 || uc.dwHostNameLength == 0) {
+                        return ERROR_INVALID_PARAMETER;
+                    }
+                    string host(uc.lpszHostName, uc.dwHostNameLength);
+                    string path = (uc.dwUrlPathLength > 0 && uc.lpszUrlPath != nullptr)
+                                  ? string(uc.lpszUrlPath, uc.dwUrlPathLength) : "/";
+
+                    // 3) 打开会话、连接、请求（RAII 风格，出错统一 goto cleanup）
+                    HINTERNET hSession = nullptr;
+                    HINTERNET hConnect = nullptr;
+                    HINTERNET hRequest = nullptr;
+                    INT32 retCode = ERROR_SUCCESS;
+
+                    hSession = inet.InternetOpenA(
+                        "ifw", INTERNET_OPEN_TYPE_PRECONFIG,
+                        nullptr, nullptr, 0);
+                    if (!hSession) {
+                        return static_cast<INT32>(GetLastError());
+                    }
+
+                    // 设超时：接收/连接/发送（长轮询核心，作用于 hSession 下所有连接）
+                    DWORD optVal = recvTimeoutMs;
+                    inet.InternetSetOptionA(hSession, INTERNET_OPTION_RECEIVE_TIMEOUT,
+                                            &optVal, sizeof(optVal));
+                    inet.InternetSetOptionA(hSession, INTERNET_OPTION_CONNECT_TIMEOUT,
+                                            &optVal, sizeof(optVal));
+                    inet.InternetSetOptionA(hSession, INTERNET_OPTION_SEND_TIMEOUT,
+                                            &optVal, sizeof(optVal));
+
+                    hConnect = inet.InternetConnectA(
+                        hSession, host.c_str(), uc.nPort,
+                        nullptr, nullptr, INTERNET_SERVICE_HTTP, 0, 0);
+                    if (!hConnect) {
+                        retCode = static_cast<INT32>(GetLastError());
+                        goto cleanup;
+                    }
+
+                    // keep-alive 便于长轮询复用连接；NO_AUTH 避免 NTLM 等自动认证
+                    hRequest = inet.HttpOpenRequestA(
+                        hConnect, method, path.c_str(), nullptr, nullptr,
+                        nullptr,
+                        INTERNET_FLAG_KEEP_CONNECTION | INTERNET_FLAG_NO_AUTH
+                            | INTERNET_FLAG_RELOAD,
+                        0);
+                    if (!hRequest) {
+                        retCode = static_cast<INT32>(GetLastError());
+                        goto cleanup;
+                    }
+
+                    // 4) 发送请求（POST 带请求体；GET 时 HttpSendRequestA body 传 0）
+                    const char *headers = "Content-Type: application/octet-stream\r\n";
+                    const LPVOID pBody = body.empty() ? nullptr
+                                                       : const_cast<LPVOID>(static_cast<const void *>(body.data()));
+                    const DWORD bodyLen = static_cast<DWORD>(body.size());
+                    const DWORD hdrLen = (DWORD)-1; // 让 WinINet 按 \0 计算
+                    if (!inet.HttpSendRequestA(hRequest, headers, hdrLen, pBody, bodyLen)) {
+                        retCode = static_cast<INT32>(GetLastError());
+                        goto cleanup;
+                    }
+
+                    // 5) 读响应（循环直到 InternetReadFile 返回 0 字节）
+                    {
+                        BYTE buf[4096];
+                        DWORD bytesRead = 0;
+                        for (;;) {
+                            bytesRead = 0;
+                            if (!inet.InternetReadFile(hRequest, buf, sizeof(buf), &bytesRead)) {
+                                retCode = static_cast<INT32>(GetLastError());
+                                goto cleanup;
+                            }
+                            if (bytesRead == 0) {
+                                break; // 响应读完
+                            }
+                            response.insert(response.end(), buf, buf + bytesRead);
+                        }
+                    }
+
+                cleanup:
+                    if (hRequest) { inet.InternetCloseHandle(hRequest); }
+                    if (hConnect) { inet.InternetCloseHandle(hConnect); }
+                    if (hSession) { inet.InternetCloseHandle(hSession); }
                     return retCode;
                 }
             } // namespace wrapper

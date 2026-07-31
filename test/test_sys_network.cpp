@@ -111,4 +111,46 @@ TEST_SUITE("sys::network::wrapper::UDPSend") {
         const auto rc = UDPSend("127.0.0.1", 1, data, &prov);
         CHECK_EQ(rc, ERROR_SUCCESS);
     }
+
+    // ============================================================
+    // HTTPRequest 烟雾测试（不联网，只测参数校验与 URL 解析路径）
+    // ============================================================
+    TEST_CASE_FIXTURE(WsaFixture, "HTTPRequest: empty url fails") {
+        Stream body{0x01, 0x02};
+        Stream resp;
+        const auto rc = HTTPRequest("", body, resp);
+        CHECK_NE(rc, ERROR_SUCCESS);
+        CHECK(resp.empty());
+    }
+
+    TEST_CASE_FIXTURE(WsaFixture, "HTTPRequest: invalid url fails") {
+        Stream body{0x01};
+        Stream resp;
+        // 缺 scheme 分隔符，InternetCrackUrlA 应失败
+        const auto rc = HTTPRequest("not-a-valid-url", body, resp);
+        CHECK_NE(rc, ERROR_SUCCESS);
+        CHECK(resp.empty());
+    }
+
+    TEST_CASE_FIXTURE(WsaFixture, "HTTPRequest: https unsupported (this round)") {
+        Stream body{0x01};
+        Stream resp;
+        // 本轮契约仅支持 http://，https 返回 ERROR_NOT_SUPPORTED
+        const auto rc = HTTPRequest("https://example.com/path", body, resp);
+        CHECK_EQ(rc, ERROR_NOT_SUPPORTED);
+        CHECK(resp.empty());
+    }
+
+#ifdef IFW_HTTP_LIVE_TEST
+    // 真实 HTTP 往返测试（默认关闭，需要本机或网络上的 HTTP 服务端）：
+    //   启用一个监听 127.0.0.1:18080 的本地服务（如 python -m http.server），
+    //   编译时加 -DIFW_HTTP_LIVE_TEST 即可运行。
+    TEST_CASE_FIXTURE(WsaFixture, "HTTPRequest: live GET to local server") {
+        Stream body{};
+        Stream resp;
+        const auto rc = HTTPRequest("http://127.0.0.1:18080/", body, resp, "GET", 5000);
+        CHECK_EQ(rc, ERROR_SUCCESS);
+        CHECK_FALSE(resp.empty());
+    }
+#endif
 }

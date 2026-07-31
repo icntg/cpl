@@ -683,6 +683,14 @@ namespace cpl {
                     _In_ DWORD dwFlags,
                     _Inout_ LPURL_COMPONENTSA lpUrlComponents
                 );
+
+                // 设置会话/连接选项（接收/连接/发送超时等）。长轮询必需。
+                typedef BOOL (WINAPI*InternetSetOptionA)(
+                    _In_ HINTERNET hInternet,
+                    _In_ DWORD dwOption,
+                    _Inout_ LPVOID lpBuffer,
+                    _In_ DWORD dwBufferLength
+                );
             }
 
             namespace IPv4 {
