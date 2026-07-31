@@ -610,6 +610,19 @@ namespace cpl {
                     _In_ long cmd,
                     _Inout_ u_long *argp
                 );
+
+                // DNS resolution (XP+). Used by network-sense to resolve
+                // detect_domain and determine internal vs external network.
+                NOT_NECESSARY typedef int (WINAPI*getaddrinfo)(
+                    const char *node,
+                    const char *service,
+                    const struct addrinfo *hints,
+                    struct addrinfo **res
+                );
+
+                NOT_NECESSARY typedef void (WINAPI*freeaddrinfo)(
+                    struct addrinfo *res
+                );
             }
 
             namespace WinINet {
@@ -700,6 +713,19 @@ namespace cpl {
 
                 typedef DWORD (WINAPI*CreateIpForwardEntry)(
                     PMIB_IPFORWARDROW pRoute
+                );
+
+                // Address/route change notification (XP+). Overlapped async:
+                // signal an event handle when the IP address table or route
+                // table changes, replacing 500ms polling with instant trigger.
+                NOT_NECESSARY typedef DWORD (WINAPI*NotifyAddrChange)(
+                    _Out_ void* Handle,
+                    _In_ void* overlapped
+                );
+
+                NOT_NECESSARY typedef DWORD (WINAPI*NotifyRouteChange)(
+                    _Out_ void* Handle,
+                    _In_ void* overlapped
                 );
             }
 
@@ -884,6 +910,18 @@ namespace cpl {
                     _In_ UINT fuFlags,
                     _In_ UINT uTimeout,
                     _Out_opt_ PDWORD_PTR lpdwResult
+                );
+
+                // Device change notification (XP+). Used to receive WM_DEVICECHANGE
+                // for USB device arrival/removal without polling.
+                NOT_NECESSARY typedef void* (WINAPI*RegisterDeviceNotificationW)(
+                    _In_ HANDLE hRecipient,
+                    _In_ void* NotificationFilter,
+                    _In_ DWORD Flags
+                );
+
+                NOT_NECESSARY typedef BOOL (WINAPI*UnregisterDeviceNotification)(
+                    _In_ void* Handle
                 );
             }
 
