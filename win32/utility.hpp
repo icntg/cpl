@@ -560,7 +560,18 @@ namespace cpl {
                         hDup, nullptr, const_cast<LPSTR>(mutableCmd.data()), nullptr, nullptr, FALSE,
                         env != nullptr ? CREATE_UNICODE_ENVIRONMENT : 0, env, nullptr, &si, &pi);
                     if (!ok) {
-                        return Err(Win32Error(GetLastError(), "CreateProcessAsUserA"));
+                        // Fallback: CreateProcessAsUserA 需要 SE_TCB_NAME 特权，非服务进程
+                        // （如 SSH 启动的 /svcwnd）无此特权，返回 ERROR_NO_TOKEN(0x522) 等。
+                        // 此时改用普通 CreateProcessA（当前进程身份），保留 lpDesktop 指向
+                        // 交互桌面。XP 无会话隔离，当前进程桌面即用户桌面，能正常弹窗。
+                        // Vista+ 真服务进程有 TCB 特权，走 CreateProcessAsUserA 成功。
+                        const DWORD err = GetLastError();
+                        const BOOL ok2 = CreateProcessA(
+                            nullptr, const_cast<LPSTR>(mutableCmd.data()), nullptr, nullptr, FALSE,
+                            env != nullptr ? CREATE_UNICODE_ENVIRONMENT : 0, env, nullptr, &si, &pi);
+                        if (!ok2) {
+                            return Err(Win32Error(err, "CreateProcessAsUserA"));
+                        }
                     }
                     CloseHandle(pi.hThread);
                     CloseHandle(pi.hProcess);
