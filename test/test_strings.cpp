@@ -128,6 +128,52 @@ TEST_SUITE("codec::Length") {
     }
 }
 
+TEST_SUITE("codec::Leb128") {
+    TEST_CASE("Encode / Decode round trip across boundaries") {
+        // LEB128 边界值：每 7 bit 一个台阶。
+        const int64_t values[] = {
+            0, 1, 126, 127, 128, 16383, 16384, 2097151, 2097152,
+            268435455,  // 2^28 - 1，4 字节边界
+            4294967295, // UINT32_MAX，5 字节
+            549755813887 // 2^39 - 1，6 字节边界
+        };
+        for (const auto v : values) {
+            const auto enc = Must(Leb128::Encode(v));
+            CHECK_FALSE(enc.empty());
+            const auto dec = Must(Leb128::Decode(enc));
+            const auto decoded = std::get<0>(dec);
+            const auto nBytes = std::get<1>(dec);
+            CHECK_EQ(decoded, v);
+            CHECK_EQ(nBytes, static_cast<uint8_t>(enc.size()));
+        }
+    }
+
+    TEST_CASE("Encode known byte patterns") {
+        // 0 → 单字节 0x00
+        CHECK_EQ(Must(Leb128::Encode(0)), Stream({0x00}));
+        // 127 → 单字节 0x7F（最大单字节值）
+        CHECK_EQ(Must(Leb128::Encode(127)), Stream({0x7F}));
+        // 128 → 两字节 [0x80, 0x01]（continuation + 1）
+        CHECK_EQ(Must(Leb128::Encode(128)), Stream({0x80, 0x01}));
+        // 300 = 0b100101100 → 两字节 [0xAC, 0x02]
+        CHECK_EQ(Must(Leb128::Encode(300)), Stream({0xAC, 0x02}));
+    }
+
+    TEST_CASE("Encode rejects negative") {
+        CHECK_FALSE(Leb128::Encode(-1).has_value());
+        CHECK_FALSE(Leb128::Encode(-100).has_value());
+    }
+
+    TEST_CASE("Decode rejects empty and truncated") {
+        // 空流
+        CHECK_FALSE(Leb128::Decode(Stream{}).has_value());
+        // 截断：0x80 有 continuation bit 但无后续字节
+        CHECK_FALSE(Leb128::Decode(Stream{0x80}).has_value());
+        // 截断：两字节序列只给一字节且 continuation 置位
+        CHECK_FALSE(Leb128::Decode(Stream{0x80, 0x80}).has_value());
+    }
+}
+
 TEST_SUITE("strings") {
     TEST_CASE("Format produces expected text") {
         CHECK_EQ(Must(Format("hello %d %s", 42, "world")), std::string("hello 42 world"));

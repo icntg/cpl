@@ -424,6 +424,73 @@ namespace cpl {
                 return std::tuple<int64_t, uint8_t>{decodedLength, nBytes};
             }
         };
+
+        /**
+         * LEB128 (Little-Endian Base 128) unsigned varint codec.
+         *
+         * 与 Length 的 UTF-8 风格变长不同：每字节低 7 位为 payload，最高位
+         * (0x80) 为 continuation bit——置位表示后续还有字节。小端序：低位在前。
+         *
+         * 值域 [0, 1<<63)，最大 9 字节。用于 dispatchwire TLV 的长度字段
+         * （参考 dhcp 数据包扩展的多字节编码思路）。
+         */
+        class Leb128 final {
+        public:
+            static Result<Stream> Encode(_In_ const int64_t value) {
+                if (value < 0) {
+                    auto es = cpl::strings::Format(
+                        "[X] leb128 input [%" PRId64 "] is negative" CPL_FILE_AND_LINE, value
+                    );
+                    if (!es) {
+                        return Err(es.error().Append(CPL_FILE_AND_LINE));
+                    }
+                    return MakeErr(Error::OutOfRange, es.value());
+                }
+                Stream out{};
+                out.clear();
+                uint64_t v = static_cast<uint64_t>(value);
+                do {
+                    const uint8_t byte = static_cast<uint8_t>(v & 0x7fu);
+                    v >>= 7u;
+                    if (v != 0u) {
+                        // 还有更高位，置 continuation bit
+                        out.push_back(byte | 0x80u);
+                    } else {
+                        out.push_back(byte);
+                    }
+                } while (v != 0u);
+                // LEB128 编码 uint64 最多 10 字节(63bit payload 需要 9 字节，第 10 字节仅最高位)；
+                // 但本实现值域限制在 [0, 1<<63)，故最多 9 字节。若因负数绕过上面检查
+                // 导致 v 非零循环超 9 次，理论上不会发生（value<0 已拦截）。
+                Ok(out)
+            }
+
+            static Result<std::tuple<int64_t, uint8_t> > Decode(_In_ const Stream &stream) {
+                if (stream.empty()) {
+                    return cpl::Err(cpl::Error(cpl::Error::NoData, CPL_FILE_AND_LINE));
+                }
+                uint64_t result = 0;
+                uint8_t shift = 0;
+                uint8_t nBytes = 0;
+                for (size_t i = 0; i < stream.size(); i++) {
+                    if (nBytes >= 9) {
+                        // 超 9 字节仍未结束，值将超出 [0, 1<<63)
+                        return cpl::Err(cpl::Error(cpl::Error::OutOfRange,
+                                                   "LEB128 exceeds 9 bytes" CPL_FILE_AND_LINE));
+                    }
+                    const uint8_t byte = stream[i];
+                    result |= static_cast<uint64_t>(byte & 0x7fu) << shift;
+                    shift += 7u;
+                    nBytes++;
+                    if ((byte & 0x80u) == 0u) {
+                        return std::tuple<int64_t, uint8_t>{static_cast<int64_t>(result), nBytes};
+                    }
+                }
+                // 流读完仍遇到 continuation bit 置位 → 截断
+                return cpl::Err(cpl::Error(cpl::Error::OutOfRange,
+                                           "LEB128 truncated (continuation bit set at end)" CPL_FILE_AND_LINE));
+            }
+        };
     }
 
     namespace strings {
