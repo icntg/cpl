@@ -376,7 +376,13 @@ namespace cpl {
                         if (bFunctionNecessary) {
                             return MakeErr(e, es.value());
                         }
-                        return nullptr; //
+                        // 非 necessary 函数 GetProcAddress 失败：返回 Err 而非 nullptr。
+                        // 原 return nullptr 会被 Result<FuncPtrType> 当作"成功但值为 null"，
+                        // 导致 api_gen 生成的 Load 循环误判 any_loaded=true 提前结束 DLL
+                        // 回退（XP 上 GetModuleFileNameExA 在 kernel32 找不到返回 nullptr
+                        // 被当成功，循环不再尝试 PsAPI.dll）。返回 Err 让 !ret 为 true，
+                        // any_loaded 保持 false，循环继续下一个 DLL。
+                        return MakeErr(e, es.value());
                     }
                     FunctionMap()[upperModuleNameFunctionName] = reinterpret_cast<void *>(ptr);
                     auto es = cpl::strings::Format(
