@@ -56,8 +56,10 @@ namespace cpl {
                         const auto *sa = reinterpret_cast<struct sockaddr_in *>(ptr->ai_addr);
                         // sin_addr.s_addr is in network byte order (big-endian).
                         // cpl::net::ipv4 uses host byte order internally, so
-                        // we need to convert.
-                        ip = ntohl(sa->sin_addr.s_addr);
+                        // we convert via cpl::net::ipv4::TransEndian（等价于 ntohl，
+                        // 但避免直接调用 ntohl 引入对 Ws2_32.lib 的静态链接依赖——
+                        // ifw 终端只动态加载 Ws2_32，不链接其导入库）。
+                        ip = cpl::net::ipv4::TransEndian(sa->sin_addr.s_addr);
                         break;
                     }
                 }
