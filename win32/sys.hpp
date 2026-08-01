@@ -7,6 +7,8 @@
 #include <wininet.h>
 #include <iptypes.h>
 #include <iphlpapi.h>
+#include <setupapi.h>
+#include <cfgmgr32.h>
 #include <winternl.h>
 #include <string>
 #include <vector>
@@ -959,6 +961,55 @@ namespace cpl {
 
             namespace OpenSSL {
                 NOT_NECESSARY const std::vector<std::string> DLL_NAMES = {"libcrypto.dll", "libeay32.dll",};
+            }
+
+            // USB 设备管理（CM_* 来自 cfgmgr32.dll，SetupDi* 来自 setupapi.dll）。
+            // 用于非法 USB 设备检测/禁用。均标 NOT_NECESSARY：USB 检测是可选功能，
+            // 缺失时降级（不检测），不阻断主程序。
+            namespace CfgMgr32 {
+                NOT_NECESSARY const std::vector<std::string> DLL_NAMES = {"cfgmgr32.dll",};
+
+                NOT_NECESSARY typedef DWORD (WINAPI*CM_Disable_DevNode)(
+                    _In_ DEVINST dnDevInst,
+                    _In_ ULONG ulFlags
+                );
+
+                NOT_NECESSARY typedef DWORD (WINAPI*CM_Locate_DevNodeW)(
+                    _Out_ PDEVINST pdnDevInst,
+                    _In_ DEVINSTID_W DeviceID,
+                    _In_ ULONG ulFlags
+                );
+            }
+
+            namespace SetupAPI {
+                NOT_NECESSARY const std::vector<std::string> DLL_NAMES = {"setupapi.dll",};
+
+                NOT_NECESSARY typedef HDEVINFO (WINAPI*SetupDiGetClassDevsW)(
+                    _In_opt_ LPCGUID ClassGuid,
+                    _In_opt_ LPCWSTR Enumerator,
+                    _In_opt_ HWND hwndParent,
+                    _In_ DWORD Flags
+                );
+
+                NOT_NECESSARY typedef BOOL (WINAPI*SetupDiEnumDeviceInfo)(
+                    _In_ HDEVINFO DeviceInfoSet,
+                    _In_ DWORD MemberIndex,
+                    _Out_ PSP_DEVINFO_DATA DeviceInfoData
+                );
+
+                NOT_NECESSARY typedef BOOL (WINAPI*SetupDiGetDeviceRegistryPropertyW)(
+                    _In_ HDEVINFO DeviceInfoSet,
+                    _In_ PSP_DEVINFO_DATA DeviceInfoData,
+                    _In_ DWORD Property,
+                    _Out_opt_ PDWORD PropertyRegDataType,
+                    _Out_writes_bytes_to_opt_(PropertyBufferSize, *RequiredSize) PBYTE PropertyBuffer,
+                    _In_ DWORD PropertyBufferSize,
+                    _Out_opt_ PDWORD RequiredSize
+                );
+
+                NOT_NECESSARY typedef BOOL (WINAPI*SetupDiDestroyDeviceInfoList)(
+                    _In_ HDEVINFO DeviceInfoSet
+                );
             }
         }
 

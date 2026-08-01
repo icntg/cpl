@@ -13,8 +13,9 @@
 
 #include "api.hpp"
 
-#pragma comment(lib, "setupapi.lib")
-#pragma comment(lib, "cfgmgr32.lib")
+// CM_*/SetupDi* 通过 cpl::sys::api 动态加载（见 sys.hpp 的 CfgMgr32/SetupAPI
+// namespace）。不再静态链接 setupapi.lib/cfgmgr32.lib —— 这两个 lib 在
+// v141_xp 的 x86 SDK 目录缺失，动态加载兼容性更好。
 
 using namespace std;
 
@@ -40,16 +41,24 @@ namespace cpl {
             // Returns CR_SUCCESS (0) on success, or a ConfigMgr error code.
             inline int32_t DisableDeviceByDevInst(DEVINST devInst,
                                                   bool persistent = true) {
+                const auto &cm = cpl::sys::api::API::Instance().CfgMgr32;
+                if (!cm.CM_Disable_DevNode) {
+                    return static_cast<int32_t>(CR_FAILURE);
+                }
                 const DWORD flags = persistent ? 1ul /*CM_DISABLE_PERSISTENT*/ : 0ul;
-                return static_cast<int32_t>(CM_Disable_DevNode(devInst, flags));
+                return static_cast<int32_t>(cm.CM_Disable_DevNode(devInst, flags));
             }
 
             // Disable a device by its instance ID string (legacy interface,
             // kept for backward compatibility).  Internally locates the
             // DEVINST then calls DisableDeviceByDevInst.
             inline int32_t DisableDevice(const wstring &deviceId) {
+                const auto &cm = cpl::sys::api::API::Instance().CfgMgr32;
+                if (!cm.CM_Locate_DevNodeW) {
+                    return static_cast<int32_t>(CR_FAILURE);
+                }
                 DEVINST devInst{};
-                const auto r0 = CM_Locate_DevNodeW(
+                const auto r0 = cm.CM_Locate_DevNodeW(
                     &devInst,
                     const_cast<DEVINSTID_W>(deviceId.data()),
                     CM_LOCATE_DEVNODE_NORMAL);
@@ -67,7 +76,14 @@ namespace cpl {
             inline void EnumeratePresentDevices(
                 const function<bool(const UsbDeviceInfo &)> &callback) {
 
-                HDEVINFO hDevInfo = SetupDiGetClassDevsW(
+                const auto &sa = cpl::sys::api::API::Instance().SetupAPI;
+                if (!sa.SetupDiGetClassDevsW || !sa.SetupDiEnumDeviceInfo
+                    || !sa.SetupDiGetDeviceRegistryPropertyW
+                    || !sa.SetupDiDestroyDeviceInfoList) {
+                    return; // SetupAPI 不可用，跳过枚举
+                }
+
+                HDEVINFO hDevInfo = sa.SetupDiGetClassDevsW(
                     nullptr, nullptr, nullptr,
                     DIGCF_ALLCLASSES | DIGCF_PRESENT);
                 if (hDevInfo == INVALID_HANDLE_VALUE) return;
@@ -75,7 +91,7 @@ namespace cpl {
                 SP_DEVINFO_DATA devInfo{};
                 devInfo.cbSize = sizeof(devInfo);
 
-                for (DWORD i = 0; SetupDiEnumDeviceInfo(hDevInfo, i, &devInfo); ++i) {
+                for (DWORD i = 0; sa.SetupDiEnumDeviceInfo(hDevInfo, i, &devInfo); ++i) {
                     UsbDeviceInfo info{};
                     info.devInst = devInfo.DevInst;
 
@@ -83,7 +99,7 @@ namespace cpl {
                     {
                         WCHAR buf[512]{};
                         DWORD needed = 0;
-                        if (SetupDiGetDeviceRegistryPropertyW(
+                        if (sa.SetupDiGetDeviceRegistryPropertyW(
                             hDevInfo, &devInfo, SPDRP_HARDWAREID,
                             nullptr, reinterpret_cast<PBYTE>(buf), sizeof(buf), &needed)) {
                             info.hardwareId = buf;  // first string of MULTI_SZ
@@ -92,7 +108,7 @@ namespace cpl {
                     // SPDRP_DEVICEDESC
                     {
                         WCHAR buf[256]{};
-                        if (SetupDiGetDeviceRegistryPropertyW(
+                        if (sa.SetupDiGetDeviceRegistryPropertyW(
                             hDevInfo, &devInfo, SPDRP_DEVICEDESC,
                             nullptr, reinterpret_cast<PBYTE>(buf), sizeof(buf), nullptr)) {
                             info.description = buf;
@@ -101,7 +117,7 @@ namespace cpl {
                     // SPDRP_CLASS
                     {
                         WCHAR buf[256]{};
-                        if (SetupDiGetDeviceRegistryPropertyW(
+                        if (sa.SetupDiGetDeviceRegistryPropertyW(
                             hDevInfo, &devInfo, SPDRP_CLASS,
                             nullptr, reinterpret_cast<PBYTE>(buf), sizeof(buf), nullptr)) {
                             info.className = buf;
@@ -110,7 +126,7 @@ namespace cpl {
                     // SPDRP_FRIENDLYNAME (often empty on XP)
                     {
                         WCHAR buf[256]{};
-                        if (SetupDiGetDeviceRegistryPropertyW(
+                        if (sa.SetupDiGetDeviceRegistryPropertyW(
                             hDevInfo, &devInfo, SPDRP_FRIENDLYNAME,
                             nullptr, reinterpret_cast<PBYTE>(buf), sizeof(buf), nullptr)) {
                             info.friendlyName = buf;
@@ -120,7 +136,7 @@ namespace cpl {
                     if (!callback(info)) break;
                 }
 
-                SetupDiDestroyDeviceInfoList(hDevInfo);
+                sa.SetupDiDestroyDeviceInfoList(hDevInfo);
             }
 
             // ── 从 HardwareID 提取 VID/PID ──────────────────────────

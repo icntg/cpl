@@ -1089,6 +1089,118 @@ namespace OpenSSL {
     };
 }
 
+namespace CfgMgr32 {
+    class DynamicModule final : public api::DynamicModule {
+    public:
+        explicit DynamicModule() : api::DynamicModule(false) {}
+        CM_Disable_DevNode CM_Disable_DevNode{};
+        CM_Locate_DevNodeW CM_Locate_DevNodeW{};
+
+        Int32Result Load() override {
+            for (const auto& dll : DLL_NAMES) {
+                (void)api::DynamicModule::Unload();
+                api::DynamicModule::szDllName = dll;
+                const auto loadRet = api::DynamicModule::Load();
+                if (!loadRet) {
+                    continue;
+                }
+                bool ok = true;
+                bool any_loaded = false;
+                const auto ret_CM_Disable_DevNode = api::DynamicModule::LoadFunction<::cpl::sys::api::CfgMgr32::CM_Disable_DevNode>("CM_Disable_DevNode", false);
+                if (!ret_CM_Disable_DevNode) {
+                } else {
+                    any_loaded = true;
+                    CM_Disable_DevNode = ret_CM_Disable_DevNode.value<>();
+                }
+                const auto ret_CM_Locate_DevNodeW = api::DynamicModule::LoadFunction<::cpl::sys::api::CfgMgr32::CM_Locate_DevNodeW>("CM_Locate_DevNodeW", false);
+                if (!ret_CM_Locate_DevNodeW) {
+                } else {
+                    any_loaded = true;
+                    CM_Locate_DevNodeW = ret_CM_Locate_DevNodeW.value<>();
+                }
+                if (ok && (any_loaded || DLL_NAMES.size() == 1)) {
+                    return 0;
+                }
+            }
+            return 0;
+        }
+
+        Int32Result Unload() override {
+            CM_Disable_DevNode = nullptr;
+            CM_Locate_DevNodeW = nullptr;
+            const auto unloadRet = api::DynamicModule::Unload();
+            if (!unloadRet) {
+                return unloadRet;
+            }
+            return 0;
+        }
+    };
+}
+
+namespace SetupAPI {
+    class DynamicModule final : public api::DynamicModule {
+    public:
+        explicit DynamicModule() : api::DynamicModule(false) {}
+        SetupDiGetClassDevsW SetupDiGetClassDevsW{};
+        SetupDiEnumDeviceInfo SetupDiEnumDeviceInfo{};
+        SetupDiGetDeviceRegistryPropertyW SetupDiGetDeviceRegistryPropertyW{};
+        SetupDiDestroyDeviceInfoList SetupDiDestroyDeviceInfoList{};
+
+        Int32Result Load() override {
+            for (const auto& dll : DLL_NAMES) {
+                (void)api::DynamicModule::Unload();
+                api::DynamicModule::szDllName = dll;
+                const auto loadRet = api::DynamicModule::Load();
+                if (!loadRet) {
+                    continue;
+                }
+                bool ok = true;
+                bool any_loaded = false;
+                const auto ret_SetupDiGetClassDevsW = api::DynamicModule::LoadFunction<::cpl::sys::api::SetupAPI::SetupDiGetClassDevsW>("SetupDiGetClassDevsW", false);
+                if (!ret_SetupDiGetClassDevsW) {
+                } else {
+                    any_loaded = true;
+                    SetupDiGetClassDevsW = ret_SetupDiGetClassDevsW.value<>();
+                }
+                const auto ret_SetupDiEnumDeviceInfo = api::DynamicModule::LoadFunction<::cpl::sys::api::SetupAPI::SetupDiEnumDeviceInfo>("SetupDiEnumDeviceInfo", false);
+                if (!ret_SetupDiEnumDeviceInfo) {
+                } else {
+                    any_loaded = true;
+                    SetupDiEnumDeviceInfo = ret_SetupDiEnumDeviceInfo.value<>();
+                }
+                const auto ret_SetupDiGetDeviceRegistryPropertyW = api::DynamicModule::LoadFunction<::cpl::sys::api::SetupAPI::SetupDiGetDeviceRegistryPropertyW>("SetupDiGetDeviceRegistryPropertyW", false);
+                if (!ret_SetupDiGetDeviceRegistryPropertyW) {
+                } else {
+                    any_loaded = true;
+                    SetupDiGetDeviceRegistryPropertyW = ret_SetupDiGetDeviceRegistryPropertyW.value<>();
+                }
+                const auto ret_SetupDiDestroyDeviceInfoList = api::DynamicModule::LoadFunction<::cpl::sys::api::SetupAPI::SetupDiDestroyDeviceInfoList>("SetupDiDestroyDeviceInfoList", false);
+                if (!ret_SetupDiDestroyDeviceInfoList) {
+                } else {
+                    any_loaded = true;
+                    SetupDiDestroyDeviceInfoList = ret_SetupDiDestroyDeviceInfoList.value<>();
+                }
+                if (ok && (any_loaded || DLL_NAMES.size() == 1)) {
+                    return 0;
+                }
+            }
+            return 0;
+        }
+
+        Int32Result Unload() override {
+            SetupDiGetClassDevsW = nullptr;
+            SetupDiEnumDeviceInfo = nullptr;
+            SetupDiGetDeviceRegistryPropertyW = nullptr;
+            SetupDiDestroyDeviceInfoList = nullptr;
+            const auto unloadRet = api::DynamicModule::Unload();
+            if (!unloadRet) {
+                return unloadRet;
+            }
+            return 0;
+        }
+    };
+}
+
 
 
 
@@ -1114,6 +1226,8 @@ public:
     WtsAPI32::DynamicModule WtsAPI32{};
     MsImg32::DynamicModule MsImg32{};
     OpenSSL::DynamicModule OpenSSL{};
+    CfgMgr32::DynamicModule CfgMgr32{};
+    SetupAPI::DynamicModule SetupAPI{};
 
     Int32Result Load() {
         if (!this->loaded) {
@@ -1177,6 +1291,14 @@ public:
             const auto ret_OpenSSL = this->OpenSSL.Load();
             if (!ret_OpenSSL) {
                 return ret_OpenSSL;
+            }
+            const auto ret_CfgMgr32 = this->CfgMgr32.Load();
+            if (!ret_CfgMgr32) {
+                return ret_CfgMgr32;
+            }
+            const auto ret_SetupAPI = this->SetupAPI.Load();
+            if (!ret_SetupAPI) {
+                return ret_SetupAPI;
             }
             return 0;
         }
