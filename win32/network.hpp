@@ -84,7 +84,7 @@ namespace cpl {
                         hInternetConnect,
                         httpMethod.data(),
                         httpRequestURL.data(),
-                        "HTTP/1.1",
+                        "HTTP/1.0",  // HTTP/1.0：避免 XP WinINet 5.1 对 chunked 解析的 bug
                         httpReferer.data(),
                         nullptr,
                         flag,
@@ -138,10 +138,11 @@ namespace cpl {
                             LOG_F(ERROR, "[x] InternetReadFile failed: [%lu] %s", e, FormatError(e).data());
                             goto __ERROR__;
                         } else {
-                            buffer[dwBytesRead] = 0;
-                            PCTSTR _$p = nullptr;
-                            memmove(&_$p, &buffer, sizeof(PCTSTR));
-                            out.append(_$p, dwBytesRead);
+                            // 正确追加响应数据：buffer 是 BYTE[]（unsigned char），
+                            // 直接 insert 到 out（cpl::Stream = vector<uint8_t>）。
+                            // 原代码错误地把 buffer 前 sizeof(指针) 字节当指针地址用，
+                            // 导致读取垃圾内存（WinINet 响应被截断为随机字节）。
+                            out.insert(out.end(), buffer, buffer + dwBytesRead);
                         }
                     }
                 }
@@ -482,27 +483,36 @@ namespace cpl {
                         return ERROR_INVALID_FUNCTION; // WinINet 未就绪
                     }
 
-                    // 2) 解析 URL（InternetCrackUrlA 第一次调用拿长度，第二次填缓冲）
-                    URL_COMPONENTSA uc{};
-                    uc.dwStructSize = sizeof(uc);
-                    uc.dwSchemeLength = (DWORD)-1;
-                    uc.dwHostNameLength = (DWORD)-1;
-                    uc.dwUrlPathLength = (DWORD)-1;
-                    uc.dwUserNameLength = (DWORD)-1;
-                    uc.dwPasswordLength = (DWORD)-1;
-                    if (!inet.InternetCrackUrlA(url.c_str(), static_cast<DWORD>(url.size()), 0, &uc)) {
-                        return static_cast<INT32>(GetLastError());
-                    }
-                    if (uc.nScheme != INTERNET_SCHEME_HTTP) {
-                        // 本轮契约仅支持 http://，https 留待需要时加
+                    // 2) 解析 URL。InternetCrackUrlA 在 XP WinINet 5.1 上对长路径
+                    //    解析有 bug（dwUrlPathLength 可能被截断，导致 404）。
+                    //    手动解析 http://host:port/path 格式（契约仅支持 http）。
+                    if (url.compare(0, 7, "http://") != 0) {
                         return ERROR_NOT_SUPPORTED;
                     }
-                    if (uc.nPort == 0 || uc.dwHostNameLength == 0) {
+                    const auto hostStart = 7;
+                    const auto slashPos = url.find('/', hostStart);
+                    string hostPort;  // host:port
+                    string path;
+                    if (slashPos == string::npos) {
+                        hostPort = url.substr(hostStart);
+                        path = "/";
+                    } else {
+                        hostPort = url.substr(hostStart, slashPos - hostStart);
+                        path = url.substr(slashPos);
+                    }
+                    // 拆 hostPort → host + port
+                    string host;
+                    INTERNET_PORT port = 80;
+                    const auto colonPos = hostPort.find(':');
+                    if (colonPos != string::npos) {
+                        host = hostPort.substr(0, colonPos);
+                        port = static_cast<INTERNET_PORT>(atoi(hostPort.c_str() + colonPos + 1));
+                    } else {
+                        host = hostPort;
+                    }
+                    if (host.empty() || port == 0) {
                         return ERROR_INVALID_PARAMETER;
                     }
-                    string host(uc.lpszHostName, uc.dwHostNameLength);
-                    string path = (uc.dwUrlPathLength > 0 && uc.lpszUrlPath != nullptr)
-                                  ? string(uc.lpszUrlPath, uc.dwUrlPathLength) : "/";
 
                     // 3) 打开会话、连接、请求（RAII 风格，出错统一 goto cleanup）
                     HINTERNET hSession = nullptr;
@@ -511,7 +521,7 @@ namespace cpl {
                     INT32 retCode = ERROR_SUCCESS;
 
                     hSession = inet.InternetOpenA(
-                        "ifw", INTERNET_OPEN_TYPE_PRECONFIG,
+                        "ifw", INTERNET_OPEN_TYPE_DIRECT,
                         nullptr, nullptr, 0);
                     if (!hSession) {
                         return static_cast<INT32>(GetLastError());
@@ -527,7 +537,7 @@ namespace cpl {
                                             &optVal, sizeof(optVal));
 
                     hConnect = inet.InternetConnectA(
-                        hSession, host.c_str(), uc.nPort,
+                        hSession, host.c_str(), port,
                         nullptr, nullptr, INTERNET_SERVICE_HTTP, 0, 0);
                     if (!hConnect) {
                         retCode = static_cast<INT32>(GetLastError());
