@@ -279,6 +279,20 @@ namespace cpl {
 
             namespace path {
                 inline Result<std::string> GetCurrentPath() {
+                    // 优先用 GetModuleFileNameA（kernel32 自 Win95 就有，XP 完美支持，
+                    // 不需 psapi/跨进程 API）。这是查自身进程 exe 全路径的最可靠方式，
+                    // Vista+ 的 QueryFullProcessImageNameA 和 psapi 的 GetModuleFileNameExA
+                    // 在 XP 上不可用/行为受限。
+                    char buffer[MAX_PATH << 1] = {};
+                    const auto &api = api::API::Instance();
+                    if (api.Kernel32.GetModuleFileNameA) {
+                        const DWORD len = api.Kernel32.GetModuleFileNameA(nullptr, buffer, sizeof(buffer));
+                        if (len > 0 && len < sizeof(buffer)) {
+                            return std::string(buffer);
+                        }
+                    }
+                    // fallback：跨进程查询路径（Vista+ 完整支持，XP 上对自身进程也可能
+                    // 因 psapi 不可用而失败，但保留作兜底）。
                     return process::GetProcessPath(::GetCurrentProcessId());
                 }
 

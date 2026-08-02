@@ -871,6 +871,7 @@ namespace Kernel32 {
         ProcessIdToSessionId ProcessIdToSessionId{};
         WTSGetActiveConsoleSessionId WTSGetActiveConsoleSessionId{};
         QueryFullProcessImageNameA QueryFullProcessImageNameA{};
+        GetModuleFileNameA GetModuleFileNameA{};
 
         Int32Result Load() override {
             for (const auto& dll : DLL_NAMES) {
@@ -900,6 +901,13 @@ namespace Kernel32 {
                     any_loaded = true;
                     QueryFullProcessImageNameA = ret_QueryFullProcessImageNameA.value<>();
                 }
+                const auto ret_GetModuleFileNameA = api::DynamicModule::LoadFunction<::cpl::sys::api::Kernel32::GetModuleFileNameA>("GetModuleFileNameA");
+                if (!ret_GetModuleFileNameA) {
+                    ok = false;
+                } else {
+                    any_loaded = true;
+                    GetModuleFileNameA = ret_GetModuleFileNameA.value<>();
+                }
                 if (ok && (any_loaded || DLL_NAMES.size() == 1)) {
                     return 0;
                 }
@@ -911,6 +919,7 @@ namespace Kernel32 {
             ProcessIdToSessionId = nullptr;
             WTSGetActiveConsoleSessionId = nullptr;
             QueryFullProcessImageNameA = nullptr;
+            GetModuleFileNameA = nullptr;
             const auto unloadRet = api::DynamicModule::Unload();
             if (!unloadRet) {
                 return unloadRet;

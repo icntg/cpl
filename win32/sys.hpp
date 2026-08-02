@@ -913,6 +913,15 @@ namespace cpl {
                     _Out_ LPSTR lpExeName,
                     _Inout_ PDWORD lpdwSize
                 );
+
+                // GetModuleFileNameA: kernel32 自 Win95 就有，XP 完美支持。
+                // 用于 GetCurrentPath 取自身进程 exe 全路径（无需 psapi/跨进程 API）。
+                // 标记为必要加载（kernel32 必有此导出）。
+                typedef DWORD (WINAPI*GetModuleFileNameA)(
+                    _In_opt_ HMODULE hModule,
+                    _Out_ LPSTR lpFilename,
+                    _In_ DWORD nSize
+                );
             }
 
             namespace User32 {
