@@ -114,7 +114,9 @@ namespace cpl {
                     }
                     return MakeErr(Errors::MultiByteToWideChar, es.value());
                 }
-                return std::wstring{buffer.begin(), buffer.end()};
+                // MultiByteToWideChar(..., -1, ...) 返回值含 null 终止符。
+                // 构造 wstring 时去掉末尾的 null，否则后续 find/compare 会出错。
+                return std::wstring{buffer.begin(), buffer.begin() + r0 - 1};
             }
         }
 
