@@ -89,7 +89,10 @@ namespace cpl {
                     }
                     return MakeErr(Errors::WideCharToMultiByte, es.value());
                 }
-                return std::string{buffer.begin(), buffer.end()};
+                // WideCharToMultiByte(..., -1, ...) 返回值 r0 含 null 终止符。
+                // 构造 string 时去掉末尾的 null，否则后续 TLV 编码会把 NUL
+                // 写入 payload，PG 的 text 列会拒绝（invalid byte sequence）。
+                return std::string{buffer.begin(), buffer.begin() + r0 - 1};
             }
         }
 
