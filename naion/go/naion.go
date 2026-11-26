@@ -101,12 +101,36 @@ const (
 	BoxSealBytesMax      = 48
 )
 
+// CSM nonce modes: the nonceMode argument of the *Ex size helpers and of the
+// *WithNonceMode methods. They mirror NAION_CSM_NONCE_DERIVED and
+// NAION_CSM_NONCE_RANDOM from naion.h. Sender and receiver must use the same
+// mode; the packet itself carries no mode marker.
 const (
-	CSMPacketOverhead        = 136
-	CSMClientPKBytes         = 32
-	CSMMaxUDPDatagramBytes   = 1024
-	CSMMaxClientPayloadBytes = 856
-	CSMMaxServerPayloadBytes = 888
+	// CSMNonceDerived is the default ("compact mode"). The nonce is derived
+	// from the X25519 shared secret of the packet and is not transmitted, so
+	// the packet has no nonce field.
+	CSMNonceDerived = 0
+	// CSMNonceRandom transmits 24 random nonce bytes in the packet (the
+	// behaviour of the naion.h revision before the nonce mode existed).
+	CSMNonceRandom = 1
+)
+
+// CSM packet budget. Like naion.h, the plain names describe the default
+// (derived nonce, compact) packet and the CSMRandom* names describe the
+// random nonce packet. The *Ex functions take the nonce mode explicitly.
+const (
+	CSMClientPKBytes       = 32
+	CSMMaxUDPDatagramBytes = 1024
+
+	// signature(64) | session_x25519_public_key(32) | mac(16) | ciphertext
+	CSMPacketOverhead        = SignEd25519Bytes + BoxPublicKeyBytesMax + BoxMacBytesMax
+	CSMMaxClientPayloadBytes = CSMMaxUDPDatagramBytes - CSMPacketOverhead - CSMClientPKBytes
+	CSMMaxServerPayloadBytes = CSMMaxUDPDatagramBytes - CSMPacketOverhead
+
+	// signature(64) | session_x25519_public_key(32) | nonce(24) | mac(16) | ciphertext
+	CSMRandomPacketOverhead        = CSMPacketOverhead + BoxNonceBytesMax
+	CSMRandomMaxClientPayloadBytes = CSMMaxUDPDatagramBytes - CSMRandomPacketOverhead - CSMClientPKBytes
+	CSMRandomMaxServerPayloadBytes = CSMMaxUDPDatagramBytes - CSMRandomPacketOverhead
 )
 
 const CSMCACertBytes = 96
@@ -1428,89 +1452,207 @@ func CSMServerCreate(edSeed *[32]byte) (*CSMServer, CSMError) {
 	return s, CSMOK
 }
 
+// CSMNonceFieldBytes returns the length of the nonce field inside a packet:
+// BoxNonceBytesMax in random mode, none in derived (compact) mode. Any
+// nonceMode != CSMNonceDerived selects random mode, as in naion.h.
+func CSMNonceFieldBytes(nonceMode int) int { return csmNonceFieldBytes(nonceMode) }
+
+// CSMPacketOverheadEx returns the fixed per-packet overhead of nonceMode
+// (112 bytes in derived mode, 136 bytes in random mode).
+func CSMPacketOverheadEx(nonceMode int) int {
+	return SignEd25519Bytes + BoxPublicKeyBytesMax + csmNonceFieldBytes(nonceMode) + BoxMacBytesMax
+}
+
+// CSMMaxClientPayloadBytesEx returns the largest client to server payload
+// whose packet still fits into a CSMMaxUDPDatagramBytes datagram in nonceMode
+// (880 bytes in derived mode, 856 bytes in random mode).
+func CSMMaxClientPayloadBytesEx(nonceMode int) int {
+	return CSMMaxUDPDatagramBytes - CSMPacketOverheadEx(nonceMode) - CSMClientPKBytes
+}
+
+// CSMMaxServerPayloadBytesEx returns the largest server to client payload
+// whose packet still fits into a CSMMaxUDPDatagramBytes datagram in nonceMode
+// (912 bytes in derived mode, 888 bytes in random mode).
+func CSMMaxServerPayloadBytesEx(nonceMode int) int {
+	return CSMMaxUDPDatagramBytes - CSMPacketOverheadEx(nonceMode)
+}
+
+// CSMClientEncryptSize returns the client to server packet size in the
+// default (derived nonce, compact) mode: 112 + 32 + plaintextLen.
 func CSMClientEncryptSize(plaintextLen int) int {
-	return 64 + 32 + 24 + 16 + 32 + plaintextLen
+	return CSMClientEncryptSizeEx(plaintextLen, CSMNonceDerived)
 }
 
+// CSMClientEncryptSizeEx returns the client to server packet size in nonceMode:
+// packet overhead + client public key + plaintextLen.
+func CSMClientEncryptSizeEx(plaintextLen, nonceMode int) int {
+	return CSMPacketOverheadEx(nonceMode) + CSMClientPKBytes + plaintextLen
+}
+
+// CSMClientDecryptMaxPlaintextSize returns the upper bound of a server to
+// client packet in the default (derived nonce, compact) mode.
 func CSMClientDecryptMaxPlaintextSize(packetLen int) int {
-	fixed := 64 + 32 + 24 + 16
+	return CSMClientDecryptMaxPlaintextSizeEx(packetLen, CSMNonceDerived)
+}
+
+// CSMClientDecryptMaxPlaintextSizeEx returns the upper bound of a server to
+// client packet in nonceMode, or 0 if the packet cannot hold any plaintext.
+func CSMClientDecryptMaxPlaintextSizeEx(packetLen, nonceMode int) int {
+	fixed := CSMPacketOverheadEx(nonceMode)
 	if packetLen <= fixed {
 		return 0
 	}
 	return packetLen - fixed
 }
 
+// CSMServerEncryptSize returns the server to client packet size in the
+// default (derived nonce, compact) mode: 112 + plaintextLen.
 func CSMServerEncryptSize(plaintextLen int) int {
-	return 64 + 32 + 24 + 16 + plaintextLen
+	return CSMServerEncryptSizeEx(plaintextLen, CSMNonceDerived)
 }
 
+// CSMServerEncryptSizeEx returns the server to client packet size in nonceMode:
+// packet overhead + plaintextLen.
+func CSMServerEncryptSizeEx(plaintextLen, nonceMode int) int {
+	return CSMPacketOverheadEx(nonceMode) + plaintextLen
+}
+
+// CSMServerDecryptMaxPlaintextSize returns the upper bound of a client to
+// server packet in the default (derived nonce, compact) mode.
 func CSMServerDecryptMaxPlaintextSize(packetLen int) int {
-	fixed := 64 + 32 + 24 + 16 + 32
+	return CSMServerDecryptMaxPlaintextSizeEx(packetLen, CSMNonceDerived)
+}
+
+// CSMServerDecryptMaxPlaintextSizeEx returns the upper bound of a client to
+// server packet in nonceMode, or 0 if the packet cannot hold any plaintext.
+func CSMServerDecryptMaxPlaintextSizeEx(packetLen, nonceMode int) int {
+	fixed := CSMPacketOverheadEx(nonceMode) + CSMClientPKBytes
 	if packetLen <= fixed {
 		return 0
 	}
 	return packetLen - fixed
 }
 
-// csmInternalSeal performs the CSM AEAD seal: derives the beforenm key from the
-// ephemeral X25519 key pair, generates a fresh nonce, and IETF-AEAD encrypts.
-// Writes nonce || mac || ciphertext into out (aad = sessionXPub).
-func csmInternalSeal(plaintext, peerXPub, selfXSk, aad, out []byte) CSMError {
-	var nonce [24]byte
-	if err := fillRandom(nonce[:]); err != nil {
-		return CSMErrRandomProvider
+// csmNonceKDFIn is the 16-byte HChaCha20 input of the derived nonce
+// (the ASCII string "naion.csm.nonce.").
+var csmNonceKDFIn = [16]byte{'n', 'a', 'i', 'o', 'n', '.', 'c', 's', 'm', '.', 'n', 'o', 'n', 'c', 'e', '.'}
+
+func init() {
+	// The KDF input is part of the wire format; fail loudly if it is mistyped.
+	if string(csmNonceKDFIn[:]) != "naion.csm.nonce." {
+		panic("naion: csmNonceKDFIn is not the ASCII string \"naion.csm.nonce.\"")
 	}
-	var ekey [32]byte
-	k, err := beforeNMRaw(peerXPub, selfXSk)
+}
+
+// csmNonceFieldBytes is the length of the nonce field inside the packet:
+// 24 bytes in random mode, none in derived (compact) mode.
+func csmNonceFieldBytes(nonceMode int) int {
+	if nonceMode != CSMNonceDerived {
+		return BoxNonceBytesMax
+	}
+	return 0
+}
+
+// csmSessionKeypair generates the one-time X25519 key pair of a single packet
+// from the configured random provider, like naion_box_keypair() does in
+// naion.h (32 random bytes, then the base point multiplication).
+func csmSessionKeypair() (pk, sk [32]byte, rc CSMError) {
+	if err := fillRandom(sk[:]); err != nil {
+		return pk, sk, CSMErrRandomProvider
+	}
+	base, err := ScalarMultCurve25519Base(&sk)
 	if err != nil {
-		return CSMErrCrypto
+		MemZero(sk[:])
+		return pk, sk, CSMErrCrypto
 	}
-	ekey = k
-	copy(out[:24], nonce[:])
-	ct, mac, err := aeadIETFXChaCha20Poly1305EncryptDetached(plaintext, aad, nonce[:], ekey[:])
+	return *base, sk, CSMOK
+}
+
+// csmInternalDerive turns the X25519 shared secret of one packet into its AEAD
+// key and its derived nonce:
+//
+//	shared = X25519(selfXSk, peerXPub)                  32 raw bytes
+//	ekey   = HChaCha20(key = shared, in = 0^16)         same as beforenm
+//	nonce  = HChaCha20(key = shared, in = "naion.csm.nonce.")[0..23]
+//
+// The two HChaCha20 calls take different inputs, so the nonce reveals nothing
+// about ekey. ekey and nonce are returned as two independent arrays: the nonce
+// bytes are copied out of the 32-byte KDF output, which is then wiped.
+func csmInternalDerive(peerXPub, selfXSk []byte) (ekey [32]byte, nonce [24]byte, err error) {
+	var n, p [32]byte
+	copy(n[:], selfXSk)
+	copy(p[:], peerXPub)
+	shared, err := ScalarMultCurve25519(&n, &p)
+	if err != nil {
+		return ekey, nonce, err
+	}
+	defer MemZero(shared[:])
+	var zero16 [16]byte
+	ekey = hChaCha20(shared[:], zero16[:])
+	derived := hChaCha20(shared[:], csmNonceKDFIn[:])
+	copy(nonce[:], derived[:BoxNonceBytesMax])
+	MemZero(derived[:])
+	return ekey, nonce, nil
+}
+
+// csmInternalSeal seals plaintext with the one-time X25519 key pair of the
+// packet and IETF-AEAD encrypts (aad = sessionXPub). It writes
+// [nonce ||] mac || ciphertext into out; the 24-byte nonce field only exists in
+// random mode, derived mode uses the nonce derived from the shared secret.
+// out must be at least csmNonceFieldBytes(nonceMode) + 16 + len(plaintext) bytes long.
+func csmInternalSeal(plaintext, peerXPub, selfXSk, aad, out []byte, nonceMode int) CSMError {
+	nonceField := csmNonceFieldBytes(nonceMode)
+	ekey, nonce, err := csmInternalDerive(peerXPub, selfXSk)
 	if err != nil {
 		MemZero(ekey[:])
+		MemZero(nonce[:])
 		return CSMErrCrypto
 	}
-	copy(out[24:24+16], mac[:])
-	copy(out[24+16:], ct)
-	MemZero(ekey[:])
+	defer MemZero(ekey[:])
+	defer MemZero(nonce[:])
+	if nonceField != 0 {
+		// Random mode: replace the derived nonce and store it in the packet.
+		if err := fillRandom(nonce[:]); err != nil {
+			return CSMErrRandomProvider
+		}
+		copy(out[:nonceField], nonce[:])
+	}
+	ct, mac, err := aeadIETFXChaCha20Poly1305EncryptDetached(plaintext, aad, nonce[:], ekey[:])
+	if err != nil {
+		return CSMErrCrypto
+	}
+	copy(out[nonceField:nonceField+BoxMacBytesMax], mac[:])
+	copy(out[nonceField+BoxMacBytesMax:], ct)
 	return CSMOK
 }
 
-func csmInternalOpen(nonceCipher, peerXPub, selfXSk, aad []byte) ([]byte, CSMError) {
-	if len(nonceCipher) <= 24+16 {
+// csmInternalOpen is the inverse of csmInternalSeal. nonceCipher holds
+// [nonce ||] mac || ciphertext; the nonce field only exists in random mode.
+// A packet sealed in the other nonce mode fails the AEAD verification.
+func csmInternalOpen(nonceCipher, peerXPub, selfXSk, aad []byte, nonceMode int) ([]byte, CSMError) {
+	nonceField := csmNonceFieldBytes(nonceMode)
+	if len(nonceCipher) <= nonceField+BoxMacBytesMax {
 		return nil, CSMErrInvalidArg
 	}
-	plaintextLen := len(nonceCipher) - 24 - 16
-	nonce := nonceCipher[:24]
-	mac := nonceCipher[24 : 24+16]
-	ciphertext := nonceCipher[24+16:]
-	k, err := beforeNMRaw(peerXPub, selfXSk)
+	ekey, nonce, err := csmInternalDerive(peerXPub, selfXSk)
+	if err != nil {
+		MemZero(ekey[:])
+		MemZero(nonce[:])
+		return nil, CSMErrCrypto
+	}
+	defer MemZero(ekey[:])
+	defer MemZero(nonce[:])
+	// Random mode: the nonce travels in the packet. Derived mode: use the KDF output.
+	if nonceField != 0 {
+		copy(nonce[:], nonceCipher[:nonceField])
+	}
+	mac := nonceCipher[nonceField : nonceField+BoxMacBytesMax]
+	ciphertext := nonceCipher[nonceField+BoxMacBytesMax:]
+	pt, err := aeadIETFXChaCha20Poly1305DecryptDetached(ciphertext, mac, aad, nonce[:], ekey[:])
 	if err != nil {
 		return nil, CSMErrCrypto
 	}
-	pt, err := aeadIETFXChaCha20Poly1305DecryptDetached(ciphertext, mac, aad, nonce, k[:])
-	MemZero(k[:])
-	if err != nil {
-		return nil, CSMErrCrypto
-	}
-	_ = plaintextLen
 	return pt, CSMOK
-}
-
-// beforeNMRaw computes HChaCha20(X25519(selfXSk, peerXPub), zero16) from slices.
-func beforeNMRaw(peerXPub, selfXSk []byte) ([32]byte, error) {
-	var n, p, k [32]byte
-	copy(n[:], selfXSk)
-	copy(p[:], peerXPub)
-	s, err := ScalarMultCurve25519(&n, &p)
-	if err != nil {
-		return k, err
-	}
-	var zero16 [16]byte
-	k = hChaCha20(s[:], zero16[:])
-	return k, nil
 }
 
 func csmInternalSign(buffer, edSK []byte) ([64]byte, CSMError) {
@@ -1534,140 +1676,203 @@ func csmInternalVerify(sig, buffer, edPK []byte) CSMError {
 	return CSMErrVerifyFailed
 }
 
+// Encrypt seals plaintext into a client to server packet in the default
+// (derived nonce, compact) mode.
 func (c *CSMClient) Encrypt(plaintext []byte) ([]byte, CSMError) {
-	if len(plaintext) == 0 {
-		return nil, CSMErrNoData
-	}
-	out := make([]byte, CSMClientEncryptSize(len(plaintext)))
-	serverXPK, err := SignEd25519PKToCurve25519(&c.ServerEdPublicKey)
-	if err != nil {
-		return nil, CSMErrCrypto
-	}
-	var sessionXSK [32]byte
-	if _, err := rand.Read(sessionXSK[:]); err != nil {
-		return nil, CSMErrRandomProvider
-	}
-	sessionXPK, err := ScalarMultCurve25519Base(&sessionXSK)
-	if err != nil {
-		return nil, CSMErrCrypto
-	}
-	body := out[64:]
-	copy(body[:32], sessionXPK[:])
-	bodyPayload := body[32:]
-	plainPayload := make([]byte, 32+len(plaintext))
-	copy(plainPayload[:32], c.EdPublicKey[:])
-	copy(plainPayload[32:], plaintext)
-	if rc := csmInternalSeal(plainPayload, serverXPK[:], sessionXSK[:], sessionXPK[:], bodyPayload); rc != CSMOK {
-		MemZero(sessionXSK[:])
-		return nil, rc
-	}
-	bodyLen := 32 + len(bodyPayload)
-	sig, rc := csmInternalSign(body[:bodyLen], c.EdSecretKey[:])
-	if rc != CSMOK {
-		MemZero(sessionXSK[:])
-		return nil, rc
-	}
-	copy(out[:64], sig[:])
-	MemZero(sessionXSK[:])
-	return out, CSMOK
+	return c.EncryptWithNonceMode(plaintext, CSMNonceDerived)
 }
 
+// EncryptWithNonceMode seals plaintext into a client to server packet:
+//
+//	signature(64) | session_x25519_public_key(32) | [nonce(24) |] mac(16) | ciphertext
+//
+// The nonce field only exists in random mode (nonceMode != CSMNonceDerived);
+// in derived mode the nonce is derived from the packet's X25519 shared secret
+// and nothing is transmitted. The encrypted plaintext is
+// client_ed_pk(32) || plaintext, so the packet is
+// CSMClientEncryptSizeEx(len(plaintext), nonceMode) bytes long. The receiver
+// has to use the same nonce mode.
+func (c *CSMClient) EncryptWithNonceMode(plaintext []byte, nonceMode int) ([]byte, CSMError) {
+	return csmClientEncrypt(&c.EdSecretKey, &c.EdPublicKey, &c.ServerEdPublicKey, plaintext, nonceMode)
+}
+
+// Decrypt opens a server to client packet in the default (derived nonce,
+// compact) mode.
 func (c *CSMClient) Decrypt(packet []byte) ([]byte, CSMError) {
-	minSize := 64 + 32 + 24 + 16
-	if len(packet) <= minSize {
-		return nil, CSMErrInvalidArg
-	}
-	sig := packet[:64]
-	body := packet[64:]
-	if rc := csmInternalVerify(sig, body, c.ServerEdPublicKey[:]); rc != CSMOK {
-		return nil, CSMErrVerifyFailed
-	}
-	clientXSK, err := SignEd25519SKToCurve25519(&c.EdSecretKey)
-	if err != nil {
-		return nil, CSMErrCrypto
-	}
-	sessionXPK := body[:32]
-	nonceCipher := body[32:]
-	pt, rc := csmInternalOpen(nonceCipher, sessionXPK, clientXSK[:], sessionXPK)
-	if rc != CSMOK {
-		return nil, rc
-	}
-	MemZero(clientXSK[:])
-	return pt, CSMOK
+	return c.DecryptWithNonceMode(packet, CSMNonceDerived)
 }
 
+// DecryptWithNonceMode verifies the server signature of a server to client
+// packet and opens it with nonceMode. A packet sealed in the other nonce mode
+// fails with CSMErrCrypto.
+func (c *CSMClient) DecryptWithNonceMode(packet []byte, nonceMode int) ([]byte, CSMError) {
+	return csmClientDecrypt(&c.EdSecretKey, &c.ServerEdPublicKey, packet, nonceMode)
+}
+
+// Decrypt opens a client to server packet in the default (derived nonce,
+// compact) mode.
 func (s *CSMServer) Decrypt(packet []byte) ([]byte, CSMError) {
-	minSize := 64 + 32 + 24 + 16 + 32
-	if len(packet) <= minSize {
-		return nil, CSMErrInvalidArg
-	}
-	serverXSK, err := SignEd25519SKToCurve25519(&s.EdSecretKey)
-	if err != nil {
-		return nil, CSMErrCrypto
-	}
-	sig := packet[:64]
-	body := packet[64:]
-	sessionXPK := body[:32]
-	nonceCipher := body[32:]
-	opened, rc := csmInternalOpen(nonceCipher, sessionXPK, serverXSK[:], sessionXPK)
+	return s.DecryptWithNonceMode(packet, CSMNonceDerived)
+}
+
+// DecryptWithNonceMode opens a client to server packet with nonceMode and
+// learns the client Ed25519 public key from its plaintext. The client key is
+// only stored once the packet has been opened and its signature verified, so a
+// packet sealed in another nonce mode (CSMErrCrypto) teaches the server
+// nothing.
+func (s *CSMServer) DecryptWithNonceMode(packet []byte, nonceMode int) ([]byte, CSMError) {
+	clientEdPK, plaintext, rc := csmServerDecrypt(&s.EdSecretKey, packet, nonceMode)
 	if rc != CSMOK {
-		MemZero(serverXSK[:])
-		return nil, rc
-	}
-	if len(opened) <= 32 {
-		MemZero(serverXSK[:])
-		return nil, CSMErrCrypto
-	}
-	var clientEdPK [32]byte
-	copy(clientEdPK[:], opened[:32])
-	if rc := csmInternalVerify(sig, body, clientEdPK[:]); rc != CSMOK {
-		MemZero(serverXSK[:])
 		return nil, rc
 	}
 	s.ClientEdPublicKey = clientEdPK
 	s.ClientPublicKeyInitialized = true
-	pt := make([]byte, len(opened)-32)
-	copy(pt, opened[32:])
-	MemZero(serverXSK[:])
-	return pt, CSMOK
+	return plaintext, CSMOK
 }
 
+// Encrypt seals plaintext into a server to client packet in the default
+// (derived nonce, compact) mode.
 func (s *CSMServer) Encrypt(plaintext []byte) ([]byte, CSMError) {
+	return s.EncryptWithNonceMode(plaintext, CSMNonceDerived)
+}
+
+// EncryptWithNonceMode seals plaintext into a server to client packet:
+//
+//	signature(64) | session_x25519_public_key(32) | [nonce(24) |] mac(16) | ciphertext
+//
+// The nonce field only exists in random mode (nonceMode != CSMNonceDerived).
+// The packet is CSMServerEncryptSizeEx(len(plaintext), nonceMode) bytes long
+// and the receiver has to use the same nonce mode. The client key must have
+// been learnt from a client packet first (CSMErrState otherwise).
+func (s *CSMServer) EncryptWithNonceMode(plaintext []byte, nonceMode int) ([]byte, CSMError) {
 	if len(plaintext) == 0 {
 		return nil, CSMErrNoData
 	}
 	if !s.ClientPublicKeyInitialized {
 		return nil, CSMErrState
 	}
-	out := make([]byte, CSMServerEncryptSize(len(plaintext)))
-	clientXPK, err := SignEd25519PKToCurve25519(&s.ClientEdPublicKey)
+	return csmServerEncrypt(&s.EdSecretKey, &s.ClientEdPublicKey, plaintext, nonceMode)
+}
+
+// csmClientEncrypt is the Layer 3 client encryptor. CSMClient and CSMCAClient
+// both delegate to it, like naion_csm_ca_client_encrypt_ex() does in naion.h.
+// Every packet uses a fresh one-time X25519 key pair.
+func csmClientEncrypt(edSecretKey *[64]byte, edPublicKey, serverEdPublicKey *[32]byte, plaintext []byte, nonceMode int) ([]byte, CSMError) {
+	if len(plaintext) == 0 {
+		return nil, CSMErrNoData
+	}
+	out := make([]byte, CSMClientEncryptSizeEx(len(plaintext), nonceMode))
+	serverXPK, err := SignEd25519PKToCurve25519(serverEdPublicKey)
 	if err != nil {
 		return nil, CSMErrCrypto
 	}
-	var sessionXSK [32]byte
-	if _, err := rand.Read(sessionXSK[:]); err != nil {
-		return nil, CSMErrRandomProvider
-	}
-	sessionXPK, err := ScalarMultCurve25519Base(&sessionXSK)
-	if err != nil {
-		return nil, CSMErrCrypto
-	}
-	body := out[64:]
-	copy(body[:32], sessionXPK[:])
-	bodyPayload := body[32:]
-	if rc := csmInternalSeal(plaintext, clientXPK[:], sessionXSK[:], sessionXPK[:], bodyPayload); rc != CSMOK {
-		MemZero(sessionXSK[:])
-		return nil, rc
-	}
-	bodyLen := 32 + len(bodyPayload)
-	sig, rc := csmInternalSign(body[:bodyLen], s.EdSecretKey[:])
+	sessionXPK, sessionXSK, rc := csmSessionKeypair()
 	if rc != CSMOK {
-		MemZero(sessionXSK[:])
 		return nil, rc
 	}
-	copy(out[:64], sig[:])
-	MemZero(sessionXSK[:])
+	defer MemZero(sessionXSK[:])
+	body := out[SignEd25519Bytes:]
+	copy(body[:BoxPublicKeyBytesMax], sessionXPK[:])
+	plainPayload := make([]byte, CSMClientPKBytes+len(plaintext))
+	defer MemZero(plainPayload)
+	copy(plainPayload[:CSMClientPKBytes], edPublicKey[:])
+	copy(plainPayload[CSMClientPKBytes:], plaintext)
+	// aad = session_x25519_public_key; the signature covers everything after itself.
+	if rc := csmInternalSeal(plainPayload, serverXPK[:], sessionXSK[:], sessionXPK[:], body[BoxPublicKeyBytesMax:], nonceMode); rc != CSMOK {
+		return nil, rc
+	}
+	sig, rc := csmInternalSign(body, edSecretKey[:])
+	if rc != CSMOK {
+		return nil, rc
+	}
+	copy(out[:SignEd25519Bytes], sig[:])
 	return out, CSMOK
+}
+
+// csmServerEncrypt is the Layer 3 server encryptor, shared by CSMServer and
+// CSMCAServer.
+func csmServerEncrypt(edSecretKey *[64]byte, clientEdPublicKey *[32]byte, plaintext []byte, nonceMode int) ([]byte, CSMError) {
+	out := make([]byte, CSMServerEncryptSizeEx(len(plaintext), nonceMode))
+	clientXPK, err := SignEd25519PKToCurve25519(clientEdPublicKey)
+	if err != nil {
+		return nil, CSMErrCrypto
+	}
+	sessionXPK, sessionXSK, rc := csmSessionKeypair()
+	if rc != CSMOK {
+		return nil, rc
+	}
+	defer MemZero(sessionXSK[:])
+	body := out[SignEd25519Bytes:]
+	copy(body[:BoxPublicKeyBytesMax], sessionXPK[:])
+	if rc := csmInternalSeal(plaintext, clientXPK[:], sessionXSK[:], sessionXPK[:], body[BoxPublicKeyBytesMax:], nonceMode); rc != CSMOK {
+		return nil, rc
+	}
+	sig, rc := csmInternalSign(body, edSecretKey[:])
+	if rc != CSMOK {
+		return nil, rc
+	}
+	copy(out[:SignEd25519Bytes], sig[:])
+	return out, CSMOK
+}
+
+// csmClientDecrypt is the Layer 3 client decryptor, shared by CSMClient and
+// CSMCAClient: the server signature is verified before the packet is opened.
+func csmClientDecrypt(edSecretKey *[64]byte, serverEdPublicKey *[32]byte, packet []byte, nonceMode int) ([]byte, CSMError) {
+	minSize := SignEd25519Bytes + BoxPublicKeyBytesMax + csmNonceFieldBytes(nonceMode) + BoxMacBytesMax
+	if len(packet) <= minSize {
+		return nil, CSMErrInvalidArg
+	}
+	sig := packet[:SignEd25519Bytes]
+	body := packet[SignEd25519Bytes:]
+	if rc := csmInternalVerify(sig, body, serverEdPublicKey[:]); rc != CSMOK {
+		return nil, rc
+	}
+	clientXSK, err := SignEd25519SKToCurve25519(edSecretKey)
+	if err != nil {
+		return nil, CSMErrCrypto
+	}
+	defer MemZero(clientXSK[:])
+	sessionXPK := body[:BoxPublicKeyBytesMax]
+	plaintext, rc := csmInternalOpen(body[BoxPublicKeyBytesMax:], sessionXPK, clientXSK[:], sessionXPK, nonceMode)
+	if rc != CSMOK {
+		return nil, CSMErrCrypto
+	}
+	return plaintext, CSMOK
+}
+
+// csmServerDecrypt is the Layer 3 server decryptor, shared by CSMServer and
+// CSMCAServer. The packet is opened with the server's long-term X25519 key,
+// the client Ed25519 public key is taken from the plaintext, and only then is
+// the signature verified with that key. The client key is returned, not
+// stored, and only together with CSMOK.
+func csmServerDecrypt(edSecretKey *[64]byte, packet []byte, nonceMode int) (clientEdPK [32]byte, plaintext []byte, rc CSMError) {
+	minSize := SignEd25519Bytes + BoxPublicKeyBytesMax + csmNonceFieldBytes(nonceMode) + BoxMacBytesMax + CSMClientPKBytes
+	if len(packet) <= minSize {
+		return clientEdPK, nil, CSMErrInvalidArg
+	}
+	serverXSK, err := SignEd25519SKToCurve25519(edSecretKey)
+	if err != nil {
+		return clientEdPK, nil, CSMErrCrypto
+	}
+	defer MemZero(serverXSK[:])
+	sig := packet[:SignEd25519Bytes]
+	body := packet[SignEd25519Bytes:]
+	sessionXPK := body[:BoxPublicKeyBytesMax]
+	opened, rc := csmInternalOpen(body[BoxPublicKeyBytesMax:], sessionXPK, serverXSK[:], sessionXPK, nonceMode)
+	if rc != CSMOK {
+		return clientEdPK, nil, CSMErrCrypto
+	}
+	defer MemZero(opened)
+	if len(opened) <= CSMClientPKBytes {
+		return clientEdPK, nil, CSMErrCrypto
+	}
+	copy(clientEdPK[:], opened[:CSMClientPKBytes])
+	if vrc := csmInternalVerify(sig, body, clientEdPK[:]); vrc != CSMOK {
+		return [32]byte{}, nil, vrc
+	}
+	plaintext = make([]byte, len(opened)-CSMClientPKBytes)
+	copy(plaintext, opened[CSMClientPKBytes:])
+	return clientEdPK, plaintext, CSMOK
 }
 
 // ===========================================================================
@@ -1751,145 +1956,99 @@ func (c *CSMCAClient) HandshakeVerify(m1 []byte) CSMError {
 	return CSMOK
 }
 
+// CSMCAClientEncryptSize returns the CSM-CA client to server packet size in
+// the default (derived nonce, compact) mode.
 func CSMCAClientEncryptSize(n int) int { return CSMClientEncryptSize(n) }
-func CSMCAClientDecryptMaxPlaintextSize(n int) int { return CSMClientDecryptMaxPlaintextSize(n) }
+
+// CSMCAClientEncryptSizeEx returns the CSM-CA client to server packet size in nonceMode.
+func CSMCAClientEncryptSizeEx(n, nonceMode int) int { return CSMClientEncryptSizeEx(n, nonceMode) }
+
+// CSMCAClientDecryptMaxPlaintextSize returns the upper bound of a CSM-CA server
+// to client packet in the default (derived nonce, compact) mode.
+func CSMCAClientDecryptMaxPlaintextSize(n int) int {
+	return CSMClientDecryptMaxPlaintextSize(n)
+}
+
+// CSMCAClientDecryptMaxPlaintextSizeEx returns the upper bound of a CSM-CA
+// server to client packet in nonceMode.
+func CSMCAClientDecryptMaxPlaintextSizeEx(n, nonceMode int) int {
+	return CSMClientDecryptMaxPlaintextSizeEx(n, nonceMode)
+}
+
+// CSMCAServerEncryptSize returns the CSM-CA server to client packet size in
+// the default (derived nonce, compact) mode.
 func CSMCAServerEncryptSize(n int) int { return CSMServerEncryptSize(n) }
-func CSMCAServerDecryptMaxPlaintextSize(n int) int { return CSMServerDecryptMaxPlaintextSize(n) }
 
+// CSMCAServerEncryptSizeEx returns the CSM-CA server to client packet size in nonceMode.
+func CSMCAServerEncryptSizeEx(n, nonceMode int) int { return CSMServerEncryptSizeEx(n, nonceMode) }
+
+// CSMCAServerDecryptMaxPlaintextSize returns the upper bound of a CSM-CA client
+// to server packet in the default (derived nonce, compact) mode.
+func CSMCAServerDecryptMaxPlaintextSize(n int) int {
+	return CSMServerDecryptMaxPlaintextSize(n)
+}
+
+// CSMCAServerDecryptMaxPlaintextSizeEx returns the upper bound of a CSM-CA
+// client to server packet in nonceMode.
+func CSMCAServerDecryptMaxPlaintextSizeEx(n, nonceMode int) int {
+	return CSMServerDecryptMaxPlaintextSizeEx(n, nonceMode)
+}
+
+// Encrypt seals pt into a CSM-CA client to server packet in the default
+// (derived nonce, compact) mode. The handshake must have verified the server
+// key first.
 func (c *CSMCAClient) Encrypt(pt []byte) ([]byte, CSMError) {
-	if len(pt) == 0 {
-		return nil, CSMErrNoData
-	}
-	out := make([]byte, CSMCAClientEncryptSize(len(pt)))
-	serverXPK, err := SignEd25519PKToCurve25519(&c.ServerEdPublicKey)
-	if err != nil {
-		return nil, CSMErrCrypto
-	}
-	var sessionXSK [32]byte
-	if _, err := rand.Read(sessionXSK[:]); err != nil {
-		return nil, CSMErrRandomProvider
-	}
-	sessionXPK, err := ScalarMultCurve25519Base(&sessionXSK)
-	if err != nil {
-		return nil, CSMErrCrypto
-	}
-	body := out[64:]
-	copy(body[:32], sessionXPK[:])
-	bodyPayload := body[32:]
-	plainPayload := make([]byte, 32+len(pt))
-	copy(plainPayload[:32], c.EdPublicKey[:])
-	copy(plainPayload[32:], pt)
-	if rc := csmInternalSeal(plainPayload, serverXPK[:], sessionXSK[:], sessionXPK[:], bodyPayload); rc != CSMOK {
-		MemZero(sessionXSK[:])
-		return nil, rc
-	}
-	bodyLen := 32 + len(bodyPayload)
-	sig, rc := csmInternalSign(body[:bodyLen], c.EdSecretKey[:])
-	if rc != CSMOK {
-		MemZero(sessionXSK[:])
-		return nil, rc
-	}
-	copy(out[:64], sig[:])
-	MemZero(sessionXSK[:])
-	return out, CSMOK
+	return c.EncryptWithNonceMode(pt, CSMNonceDerived)
 }
 
+// EncryptWithNonceMode seals pt into a CSM-CA client to server packet in
+// nonceMode. nonceMode has the same meaning as in CSMClient.EncryptWithNonceMode
+// and the post-handshake packet format is identical to Layer 3.
+func (c *CSMCAClient) EncryptWithNonceMode(pt []byte, nonceMode int) ([]byte, CSMError) {
+	return csmClientEncrypt(&c.EdSecretKey, &c.EdPublicKey, &c.ServerEdPublicKey, pt, nonceMode)
+}
+
+// Decrypt opens a CSM-CA server to client packet in the default (derived
+// nonce, compact) mode.
 func (c *CSMCAClient) Decrypt(pkt []byte) ([]byte, CSMError) {
-	minSize := 64 + 32 + 24 + 16
-	if len(pkt) <= minSize {
-		return nil, CSMErrInvalidArg
-	}
-	sig := pkt[:64]
-	body := pkt[64:]
-	if rc := csmInternalVerify(sig, body, c.ServerEdPublicKey[:]); rc != CSMOK {
-		return nil, CSMErrVerifyFailed
-	}
-	clientXSK, err := SignEd25519SKToCurve25519(&c.EdSecretKey)
-	if err != nil {
-		return nil, CSMErrCrypto
-	}
-	sessionXPK := body[:32]
-	nonceCipher := body[32:]
-	pt, rc := csmInternalOpen(nonceCipher, sessionXPK, clientXSK[:], sessionXPK)
-	MemZero(clientXSK[:])
-	return pt, rc
+	return c.DecryptWithNonceMode(pkt, CSMNonceDerived)
 }
 
+// DecryptWithNonceMode opens a CSM-CA server to client packet with nonceMode.
+func (c *CSMCAClient) DecryptWithNonceMode(pkt []byte, nonceMode int) ([]byte, CSMError) {
+	return csmClientDecrypt(&c.EdSecretKey, &c.ServerEdPublicKey, pkt, nonceMode)
+}
+
+// Encrypt seals pt into a CSM-CA server to client packet in the default
+// (derived nonce, compact) mode. The client key must have been learnt from a
+// client packet first.
 func (s *CSMCAServer) Encrypt(pt []byte) ([]byte, CSMError) {
-	if len(pt) == 0 {
-		return nil, CSMErrNoData
-	}
-	if !s.ClientKeyVerified {
-		// CSM-CA server learns client key from first decrypt; mirror CSM state guard.
-	}
-	out := make([]byte, CSMCAServerEncryptSize(len(pt)))
-	if !s.ClientKeyVerified {
-		// fall through: client key may have been set; if not, beforeNM will fail
-	}
-	clientXPK, err := SignEd25519PKToCurve25519(&s.ClientEdPublicKey)
-	if err != nil {
-		return nil, CSMErrCrypto
-	}
-	var sessionXSK [32]byte
-	if _, err := rand.Read(sessionXSK[:]); err != nil {
-		return nil, CSMErrRandomProvider
-	}
-	sessionXPK, err := ScalarMultCurve25519Base(&sessionXSK)
-	if err != nil {
-		return nil, CSMErrCrypto
-	}
-	body := out[64:]
-	copy(body[:32], sessionXPK[:])
-	bodyPayload := body[32:]
-	if rc := csmInternalSeal(pt, clientXPK[:], sessionXSK[:], sessionXPK[:], bodyPayload); rc != CSMOK {
-		MemZero(sessionXSK[:])
-		return nil, rc
-	}
-	bodyLen := 32 + len(bodyPayload)
-	sig, rc := csmInternalSign(body[:bodyLen], s.EdSecretKey[:])
-	if rc != CSMOK {
-		MemZero(sessionXSK[:])
-		return nil, rc
-	}
-	copy(out[:64], sig[:])
-	MemZero(sessionXSK[:])
-	return out, CSMOK
+	return s.EncryptWithNonceMode(pt, CSMNonceDerived)
 }
 
+// EncryptWithNonceMode seals pt into a CSM-CA server to client packet in
+// nonceMode. nonceMode has the same meaning as in CSMServer.EncryptWithNonceMode.
+func (s *CSMCAServer) EncryptWithNonceMode(pt []byte, nonceMode int) ([]byte, CSMError) {
+	return csmServerEncrypt(&s.EdSecretKey, &s.ClientEdPublicKey, pt, nonceMode)
+}
+
+// Decrypt opens a CSM-CA client to server packet in the default (derived
+// nonce, compact) mode.
 func (s *CSMCAServer) Decrypt(pkt []byte) ([]byte, CSMError) {
-	minSize := 64 + 32 + 24 + 16 + 32
-	if len(pkt) <= minSize {
-		return nil, CSMErrInvalidArg
-	}
-	serverXSK, err := SignEd25519SKToCurve25519(&s.EdSecretKey)
-	if err != nil {
-		return nil, CSMErrCrypto
-	}
-	sig := pkt[:64]
-	body := pkt[64:]
-	sessionXPK := body[:32]
-	nonceCipher := body[32:]
-	opened, rc := csmInternalOpen(nonceCipher, sessionXPK, serverXSK[:], sessionXPK)
+	return s.DecryptWithNonceMode(pkt, CSMNonceDerived)
+}
+
+// DecryptWithNonceMode opens a CSM-CA client to server packet with nonceMode.
+// The client key is only stored once the packet has been opened and its
+// signature verified.
+func (s *CSMCAServer) DecryptWithNonceMode(pkt []byte, nonceMode int) ([]byte, CSMError) {
+	clientEdPK, plaintext, rc := csmServerDecrypt(&s.EdSecretKey, pkt, nonceMode)
 	if rc != CSMOK {
-		MemZero(serverXSK[:])
-		return nil, rc
-	}
-	if len(opened) <= 32 {
-		MemZero(serverXSK[:])
-		return nil, CSMErrCrypto
-	}
-	var clientEdPK [32]byte
-	copy(clientEdPK[:], opened[:32])
-	if rc := csmInternalVerify(sig, body, clientEdPK[:]); rc != CSMOK {
-		MemZero(serverXSK[:])
 		return nil, rc
 	}
 	s.ClientEdPublicKey = clientEdPK
 	s.ClientKeyVerified = true
-	pt := make([]byte, len(opened)-32)
-	copy(pt, opened[32:])
-	MemZero(serverXSK[:])
-	return pt, CSMOK
+	return plaintext, CSMOK
 }
 
 // ===========================================================================

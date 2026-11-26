@@ -98,6 +98,8 @@ def peer_python(args: argparse.Namespace) -> int:
     client_seed = bytes.fromhex(args.client_seed)
     server_seed = bytes.fromhex(args.server_seed)
     repeat = max(1, int(args.repeat))
+    # 0 = derived nonce (compact packet), 1 = random nonce transmitted in the packet.
+    nonce_mode = int(args.nonce_mode)
     server = naion.CSMServer(server_seed)
     client = naion.CSMClient(client_seed, server.ed_public_key)
 
@@ -106,7 +108,7 @@ def peer_python(args: argparse.Namespace) -> int:
         begin = time.perf_counter_ns()
         packet = b""
         for _ in range(repeat):
-            packet = client.encrypt(payload)
+            packet = client.encrypt(payload, nonce_mode)
         elapsed_ns = time.perf_counter_ns() - begin
         json_print({"ok": True, "elapsed_ns": elapsed_ns, "repeat": repeat, "packet_b64": b64e(packet)})
         return 0
@@ -116,7 +118,7 @@ def peer_python(args: argparse.Namespace) -> int:
         begin = time.perf_counter_ns()
         plaintext = b""
         for _ in range(repeat):
-            plaintext = server.decrypt(packet)
+            plaintext = server.decrypt(packet, nonce_mode)
         elapsed_ns = time.perf_counter_ns() - begin
         json_print({"ok": True, "elapsed_ns": elapsed_ns, "repeat": repeat, "plaintext_b64": b64e(plaintext)})
         return 0
@@ -124,11 +126,11 @@ def peer_python(args: argparse.Namespace) -> int:
     if args.op == "server-encrypt":
         bootstrap_packet = b64d(args.bootstrap_packet_b64)
         payload = b64d(args.payload_b64)
-        server.decrypt(bootstrap_packet)
+        server.decrypt(bootstrap_packet, nonce_mode)
         begin = time.perf_counter_ns()
         packet = b""
         for _ in range(repeat):
-            packet = server.encrypt(payload)
+            packet = server.encrypt(payload, nonce_mode)
         elapsed_ns = time.perf_counter_ns() - begin
         json_print({"ok": True, "elapsed_ns": elapsed_ns, "repeat": repeat, "packet_b64": b64e(packet)})
         return 0
@@ -138,7 +140,7 @@ def peer_python(args: argparse.Namespace) -> int:
         begin = time.perf_counter_ns()
         plaintext = b""
         for _ in range(repeat):
-            plaintext = client.decrypt(packet)
+            plaintext = client.decrypt(packet, nonce_mode)
         elapsed_ns = time.perf_counter_ns() - begin
         json_print({"ok": True, "elapsed_ns": elapsed_ns, "repeat": repeat, "plaintext_b64": b64e(plaintext)})
         return 0
@@ -230,16 +232,22 @@ def print_failure(mode: str, size: int, enc_lang: str, dec_lang: str, stage: str
     print(error.strip())
 
 
-def run_suite(args: argparse.Namespace) -> int:
-    sizes = [int(item) for item in args.sizes.split(",") if item.strip()]
-    repeat = max(1, int(args.repeat))
-    if not sizes:
-        raise ValueError("sizes must not be empty")
+def parse_nonce_modes(text: str) -> list[int]:
+    """Comma separated nonce modes; an empty text runs no nonce mode matrix."""
+    return [int(item) for item in text.split(",") if item.strip()]
 
+
+def nonce_mode_name(nonce_mode: int) -> str:
+    if nonce_mode == naion.CSM_NONCE_DERIVED:
+        return "derived nonce, compact packet"
+    return "random nonce transmitted in the packet"
+
+
+def build_peers(args: argparse.Namespace) -> list[Peer]:
     build_go_peer(args.go)
     build_c_peer(args.cl_path, args.vcvars_path)
 
-    peers = [
+    return [
         Peer(
             "python",
             [sys.executable, str(PYTHON_PEER_SCRIPT), "peer-python"],
@@ -250,20 +258,93 @@ def run_suite(args: argparse.Namespace) -> int:
         Peer("c", [str(C_PEER_EXE)], args.client_seed, args.server_seed),
     ]
 
-    results: list[dict] = []
+
+def record(results: list[dict], nonce_mode: int | None, entry: dict) -> None:
+    """Append one result; the entries of a nonce mode matrix are tagged with it."""
+    if nonce_mode is not None:
+        entry["nonce_mode"] = nonce_mode
+    results.append(entry)
+
+
+def packet_size_error(packet: bytes, size: int, encrypt_size, nonce_mode: int | None) -> str | None:
+    """In a nonce mode matrix a packet must have the size of that nonce mode.
+
+    encrypt_size is the size helper of the encrypting side (CSMClient or
+    CSMServer); it is only called for a nonce mode matrix.
+    """
+    if nonce_mode is None:
+        return None
+    expected_size = encrypt_size(size, nonce_mode)
+    if len(packet) == expected_size:
+        return None
+    return (
+        f"packet size mismatch: expected {expected_size} bytes in nonce mode {nonce_mode}, "
+        f"got {len(packet)} bytes (does the peer support --nonce-mode?)"
+    )
+
+
+def report_size_failure(
+    results: list[dict],
+    nonce_mode: int | None,
+    label: str,
+    direction: str,
+    size: int,
+    enc_peer: Peer,
+    peers: list[Peer],
+    enc_ns: int,
+    error: str,
+) -> int:
+    """A wrongly sized packet fails for every decryptor; returns that count."""
+    for dec_peer in peers:
+        print_failure(label, size, enc_peer.name, dec_peer.name, "size", error)
+        record(results, nonce_mode,
+            {
+                "mode": direction,
+                "size": size,
+                "encryptor": enc_peer.name,
+                "decryptor": dec_peer.name,
+                "status": "size_failed",
+                "encrypt_ns": enc_ns,
+                "error": error,
+            }
+        )
+    return len(peers)
+
+
+def run_matrix(
+    peers: list[Peer],
+    sizes: list[int],
+    repeat: int,
+    nonce_mode: int | None,
+    results: list[dict],
+) -> tuple[int, int]:
+    """Encrypt with every peer and decrypt the packet with every peer, both directions.
+
+    nonce_mode None is the original matrix: no peer receives a --nonce-mode
+    argument, so every peer uses its own default nonce mode. Otherwise every
+    peer receives "--nonce-mode <nonce_mode>" for all of its operations, i.e.
+    the peers have to agree on the nonce mode exactly like the two ends of a
+    real session.
+    """
     passed = 0
     failed = 0
+    if nonce_mode is None:
+        extra_args: dict[str, str | int] | None = None
+        c2s_label, s2c_label = "C2S", "S2C"
+    else:
+        extra_args = {"nonce-mode": nonce_mode}
+        c2s_label, s2c_label = f"C2S nonce={nonce_mode}", f"S2C nonce={nonce_mode}"
 
     print("== Client -> Server ==")
     for size in sizes:
         payload = payload_for_size(size)
         for enc_peer in peers:
-            enc = enc_peer.invoke("client-encrypt", payload=payload, repeat=repeat)
+            enc = enc_peer.invoke("client-encrypt", payload=payload, repeat=repeat, extra_args=extra_args)
             if not enc.get("ok", False):
                 failed += len(peers)
                 for dec_peer in peers:
-                    print_failure("C2S", size, enc_peer.name, dec_peer.name, "encrypt", enc["error"])
-                    results.append(
+                    print_failure(c2s_label, size, enc_peer.name, dec_peer.name, "encrypt", enc["error"])
+                    record(results, nonce_mode,
                         {
                             "mode": "client_to_server",
                             "size": size,
@@ -275,12 +356,18 @@ def run_suite(args: argparse.Namespace) -> int:
                     )
                 continue
             packet = b64d(enc["packet_b64"])
+            size_error = packet_size_error(packet, size, naion.CSMClient.encrypt_size, nonce_mode)
+            if size_error is not None:
+                failed += report_size_failure(
+                    results, nonce_mode, c2s_label, "client_to_server", size, enc_peer, peers,
+                    enc["elapsed_ns"], size_error)
+                continue
             for dec_peer in peers:
-                dec = dec_peer.invoke("server-decrypt", packet=packet, repeat=repeat)
+                dec = dec_peer.invoke("server-decrypt", packet=packet, repeat=repeat, extra_args=extra_args)
                 if not dec.get("ok", False):
                     failed += 1
-                    print_failure("C2S", size, enc_peer.name, dec_peer.name, "decrypt", dec["error"])
-                    results.append(
+                    print_failure(c2s_label, size, enc_peer.name, dec_peer.name, "decrypt", dec["error"])
+                    record(results, nonce_mode,
                         {
                             "mode": "client_to_server",
                             "size": size,
@@ -296,8 +383,8 @@ def run_suite(args: argparse.Namespace) -> int:
                 if plaintext != payload:
                     failed += 1
                     error = f"plaintext mismatch: expected {len(payload)} bytes, got {len(plaintext)} bytes"
-                    print_failure("C2S", size, enc_peer.name, dec_peer.name, "verify", error)
-                    results.append(
+                    print_failure(c2s_label, size, enc_peer.name, dec_peer.name, "verify", error)
+                    record(results, nonce_mode,
                         {
                             "mode": "client_to_server",
                             "size": size,
@@ -313,8 +400,8 @@ def run_suite(args: argparse.Namespace) -> int:
                 passed += 1
                 enc_avg_ns = avg_ns(enc)
                 dec_avg_ns = avg_ns(dec)
-                print_result("C2S", size, enc_peer.name, dec_peer.name, enc_avg_ns, dec_avg_ns)
-                results.append(
+                print_result(c2s_label, size, enc_peer.name, dec_peer.name, enc_avg_ns, dec_avg_ns)
+                record(results, nonce_mode,
                     {
                         "mode": "client_to_server",
                         "size": size,
@@ -332,12 +419,12 @@ def run_suite(args: argparse.Namespace) -> int:
     for size in sizes:
         payload = payload_for_size(size)
         for enc_peer in peers:
-            bootstrap = enc_peer.invoke("client-encrypt", payload=bootstrap_payload, repeat=1)
+            bootstrap = enc_peer.invoke("client-encrypt", payload=bootstrap_payload, repeat=1, extra_args=extra_args)
             if not bootstrap.get("ok", False):
                 failed += len(peers)
                 for dec_peer in peers:
-                    print_failure("S2C", size, enc_peer.name, dec_peer.name, "bootstrap", bootstrap["error"])
-                    results.append(
+                    print_failure(s2c_label, size, enc_peer.name, dec_peer.name, "bootstrap", bootstrap["error"])
+                    record(results, nonce_mode,
                         {
                             "mode": "server_to_client",
                             "size": size,
@@ -349,12 +436,12 @@ def run_suite(args: argparse.Namespace) -> int:
                     )
                 continue
             bootstrap_packet = b64d(bootstrap["packet_b64"])
-            enc = enc_peer.invoke("server-encrypt", payload=payload, bootstrap_packet=bootstrap_packet, repeat=repeat)
+            enc = enc_peer.invoke("server-encrypt", payload=payload, bootstrap_packet=bootstrap_packet, repeat=repeat, extra_args=extra_args)
             if not enc.get("ok", False):
                 failed += len(peers)
                 for dec_peer in peers:
-                    print_failure("S2C", size, enc_peer.name, dec_peer.name, "encrypt", enc["error"])
-                    results.append(
+                    print_failure(s2c_label, size, enc_peer.name, dec_peer.name, "encrypt", enc["error"])
+                    record(results, nonce_mode,
                         {
                             "mode": "server_to_client",
                             "size": size,
@@ -366,12 +453,18 @@ def run_suite(args: argparse.Namespace) -> int:
                     )
                 continue
             packet = b64d(enc["packet_b64"])
+            size_error = packet_size_error(packet, size, naion.CSMServer.encrypt_size, nonce_mode)
+            if size_error is not None:
+                failed += report_size_failure(
+                    results, nonce_mode, s2c_label, "server_to_client", size, enc_peer, peers,
+                    enc["elapsed_ns"], size_error)
+                continue
             for dec_peer in peers:
-                dec = dec_peer.invoke("client-decrypt", packet=packet, repeat=repeat)
+                dec = dec_peer.invoke("client-decrypt", packet=packet, repeat=repeat, extra_args=extra_args)
                 if not dec.get("ok", False):
                     failed += 1
-                    print_failure("S2C", size, enc_peer.name, dec_peer.name, "decrypt", dec["error"])
-                    results.append(
+                    print_failure(s2c_label, size, enc_peer.name, dec_peer.name, "decrypt", dec["error"])
+                    record(results, nonce_mode,
                         {
                             "mode": "server_to_client",
                             "size": size,
@@ -387,8 +480,8 @@ def run_suite(args: argparse.Namespace) -> int:
                 if plaintext != payload:
                     failed += 1
                     error = f"plaintext mismatch: expected {len(payload)} bytes, got {len(plaintext)} bytes"
-                    print_failure("S2C", size, enc_peer.name, dec_peer.name, "verify", error)
-                    results.append(
+                    print_failure(s2c_label, size, enc_peer.name, dec_peer.name, "verify", error)
+                    record(results, nonce_mode,
                         {
                             "mode": "server_to_client",
                             "size": size,
@@ -404,8 +497,8 @@ def run_suite(args: argparse.Namespace) -> int:
                 passed += 1
                 enc_avg_ns = avg_ns(enc)
                 dec_avg_ns = avg_ns(dec)
-                print_result("S2C", size, enc_peer.name, dec_peer.name, enc_avg_ns, dec_avg_ns)
-                results.append(
+                print_result(s2c_label, size, enc_peer.name, dec_peer.name, enc_avg_ns, dec_avg_ns)
+                record(results, nonce_mode,
                     {
                         "mode": "server_to_client",
                         "size": size,
@@ -417,6 +510,34 @@ def run_suite(args: argparse.Namespace) -> int:
                         "repeat": repeat,
                     }
                 )
+
+    return passed, failed
+
+
+def run_suite(args: argparse.Namespace) -> int:
+    sizes = [int(item) for item in args.sizes.split(",") if item.strip()]
+    repeat = max(1, int(args.repeat))
+    if not sizes:
+        raise ValueError("sizes must not be empty")
+
+    peers = build_peers(args)
+
+    results: list[dict] = []
+    passed = 0
+    failed = 0
+
+    # The original matrix: no --nonce-mode argument, every peer uses its own
+    # default nonce mode.
+    matrix_passed, matrix_failed = run_matrix(peers, sizes, repeat, None, results)
+    passed += matrix_passed
+    failed += matrix_failed
+
+    # The same matrix once per nonce mode, with "--nonce-mode N" on every peer.
+    for nonce_mode in parse_nonce_modes(args.nonce_modes):
+        print(f"\n########## nonce mode {nonce_mode}: {nonce_mode_name(nonce_mode)} ##########")
+        matrix_passed, matrix_failed = run_matrix(peers, sizes, repeat, nonce_mode, results)
+        passed += matrix_passed
+        failed += matrix_failed
 
     if args.json_out:
         json_path = Path(args.json_out)
@@ -439,6 +560,10 @@ def build_parser() -> argparse.ArgumentParser:
     peer_parser.add_argument("--packet-b64")
     peer_parser.add_argument("--bootstrap-packet-b64")
     peer_parser.add_argument("--repeat", default="1")
+    peer_parser.add_argument(
+        "--nonce-mode", default=str(naion.CSM_NONCE_DERIVED),
+        help="0 = derived nonce (compact packet, the default), 1 = random nonce in the packet",
+    )
     peer_parser.set_defaults(func=peer_python)
 
     run_parser = subparsers.add_parser("run", help="run the full cross-language interop suite")
@@ -449,6 +574,13 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--cl-path", default=DEFAULT_CL_PATH)
     run_parser.add_argument("--vcvars-path", default=DEFAULT_VCVARS_PATH)
     run_parser.add_argument("--repeat", default="100")
+    # Nonce modes (0 = derived/compact, 1 = random) run as extra matrices on top
+    # of the original one; every peer then receives "--nonce-mode N". Empty
+    # string: only the original matrix.
+    run_parser.add_argument(
+        "--nonce-modes", default=",".join(str(mode) for mode in (naion.CSM_NONCE_DERIVED, naion.CSM_NONCE_RANDOM)),
+        help="comma separated nonce modes, each run as an extra matrix with --nonce-mode N on every peer; empty for none",
+    )
     run_parser.add_argument("--json-out")
     run_parser.set_defaults(func=run_suite)
 

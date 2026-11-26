@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 /* ========================================================================= */
 /* Test framework primitives                                                  */
@@ -437,6 +438,10 @@ static int test_generichash_errors(void)
     unsigned char key[32];
 
     TEST_BEGIN("test_generichash_errors");
+
+    /* Fixed input, although every call below has to fail before reading it. */
+    fill_pattern(in, sizeof in, 0x11);
+    fill_pattern(key, sizeof key, 0x22);
 
     /* one-shot: NULL out, NULL in with len>0, NULL state, outlen out of range,
      * key==NULL with keylen>0. */
@@ -2702,6 +2707,35 @@ static void csm_pair(naion_csm_client *c, naion_csm_server *s)
     (void) naion_csm_client_create(c, cseed, spk);
 }
 
+/*
+ * CSM packet layout (see the "nonce mode" comment in naion.h):
+ *
+ *   random nonce mode (nonce_mode != 0, NAION_CSM_NONCE_RANDOM):
+ *     signature[0:64] | session_x25519_public_key[64:96] | nonce[96:120] |
+ *     mac[120:136] | ciphertext                    fixed overhead 136
+ *   compact mode (nonce_mode == 0, NAION_CSM_NONCE_DERIVED, the default):
+ *     signature[0:64] | session_x25519_public_key[64:96] |
+ *     mac[96:112] | ciphertext                       fixed overhead 112
+ *
+ * A client -> server plaintext is client_ed25519_public_key(32) || payload, so
+ * a client packet is 32 bytes longer than a server packet of the same payload.
+ */
+#define CSM_SIG_OFFSET   0
+#define CSM_SIG_BYTES    64
+#define CSM_XPK_OFFSET   64
+#define CSM_XPK_BYTES    32
+#define CSM_NONCE_OFFSET 96
+#define CSM_NONCE_BYTES  24
+#define CSM_MAC_BYTES    16
+#define CSM_ED_PK_BYTES  32
+
+/* Length of the nonce field carried by a packet written in nonce_mode:
+ * none in the compact mode, 24 bytes in the random mode. */
+static size_t csm_nonce_field_bytes(int nonce_mode)
+{
+    return (nonce_mode == NAION_CSM_NONCE_DERIVED) ? 0U : (size_t) CSM_NONCE_BYTES;
+}
+
 /* T3.50 */
 static int test_csm_full_flow(void)
 {
@@ -2761,21 +2795,47 @@ static int test_csm_server_encrypt_before_client(void)
 /* T3.52 */
 static int test_csm_size_functions(void)
 {
-    static const size_t plens[] = { 0, 1, 32, 256, NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES };
+    static const size_t plens[] = { 0, 1, 32, 256, NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES,
+                                    NAION_CSM_COMPACT_MAX_CLIENT_PAYLOAD_BYTES };
     size_t li;
 
     TEST_BEGIN("test_csm_size_functions");
     for (li = 0; li < sizeof plens / sizeof plens[0]; li++) {
         size_t n = plens[li];
-        /* client encrypt = 168 + n  (sig64 + xpk32 + nonce24 + mac16 + edpk32) */
-        CHECK(naion_csm_client_encrypt_size(n) == 168 + n);
-        /* server encrypt = 136 + n  (sig64 + xpk32 + nonce24 + mac16) */
-        CHECK(naion_csm_server_encrypt_size(n) == 136 + n);
-        /* decrypt_max inverses */
+
+        /* default API = compact mode, the nonce is not sent:
+         *   client encrypt = 144 + n  (sig64 + xpk32 + mac16 + edpk32)
+         *   server encrypt = 112 + n  (sig64 + xpk32 + mac16) */
+        CHECK(naion_csm_client_encrypt_size(n) == 144 + n);
+        CHECK(naion_csm_server_encrypt_size(n) == 112 + n);
+        /* random nonce mode (_ex), the nonce travels in the packet:
+         *   client encrypt = 168 + n  (sig64 + xpk32 + nonce24 + mac16 + edpk32)
+         *   server encrypt = 136 + n  (sig64 + xpk32 + nonce24 + mac16) */
+        CHECK(naion_csm_client_encrypt_size_ex(n, NAION_CSM_NONCE_RANDOM) == 168 + n);
+        CHECK(naion_csm_server_encrypt_size_ex(n, NAION_CSM_NONCE_RANDOM) == 136 + n);
+        /* _ex with the derived mode is the default API */
+        CHECK(naion_csm_client_encrypt_size_ex(n, NAION_CSM_NONCE_DERIVED)
+              == naion_csm_client_encrypt_size(n));
+        CHECK(naion_csm_server_encrypt_size_ex(n, NAION_CSM_NONCE_DERIVED)
+              == naion_csm_server_encrypt_size(n));
+
+        /* decrypt_max inverses: default API, and _ex in both modes */
         CHECK(naion_csm_client_decrypt_max_plaintext_size(naion_csm_server_encrypt_size(n))
               == n);
         CHECK(naion_csm_server_decrypt_max_plaintext_size(naion_csm_client_encrypt_size(n))
               == n);
+        CHECK(naion_csm_client_decrypt_max_plaintext_size_ex(
+                  naion_csm_server_encrypt_size_ex(n, NAION_CSM_NONCE_RANDOM),
+                  NAION_CSM_NONCE_RANDOM) == n);
+        CHECK(naion_csm_server_decrypt_max_plaintext_size_ex(
+                  naion_csm_client_encrypt_size_ex(n, NAION_CSM_NONCE_RANDOM),
+                  NAION_CSM_NONCE_RANDOM) == n);
+        CHECK(naion_csm_client_decrypt_max_plaintext_size_ex(
+                  naion_csm_server_encrypt_size_ex(n, NAION_CSM_NONCE_DERIVED),
+                  NAION_CSM_NONCE_DERIVED) == n);
+        CHECK(naion_csm_server_decrypt_max_plaintext_size_ex(
+                  naion_csm_client_encrypt_size_ex(n, NAION_CSM_NONCE_DERIVED),
+                  NAION_CSM_NONCE_DERIVED) == n);
     }
     TEST_END();
 }
@@ -2841,29 +2901,67 @@ static int test_csm_buffer_too_small(void)
 /* T3.56 */
 static int test_csm_tamper_packet(void)
 {
+    static const int modes[2] = { NAION_CSM_NONCE_DERIVED, NAION_CSM_NONCE_RANDOM };
     naion_csm_client c;
     naion_csm_server s;
     unsigned char pt[32], *pkt = g_buf_a, *out = g_buf_b;
     size_t pkt_len = 0, out_len = 0;
+    int mi;
 
     TEST_BEGIN("test_csm_tamper_packet");
-    csm_pair(&c, &s);
     fill_pattern(pt, 32, 0xf6);
-    CHECK_CSM(naion_csm_client_encrypt(&c, pt, 32, pkt, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &pkt_len),
-              NAION_CSM_OK);
 
-    /* layout: sig[0:64] | eph_pk[64:96] | nonce[96:120] | mac[120:136] | ct[136:] */
-    {
-        size_t offs[] = { 0, 63, 64, 95, 96, 119, 120, 135, 136, pkt_len - 1 };
-        size_t oi;
-        for (oi = 0; oi < sizeof offs / sizeof offs[0]; oi++) {
+    for (mi = 0; mi < 2; mi++) {
+        int mode = modes[mi];
+        size_t nf = csm_nonce_field_bytes(mode);
+        /* Layout:
+         *   random:  sig[0:64] | eph_pk[64:96] | nonce[96:120] | mac[120:136] | ct[136:]
+         *   compact: sig[0:64] | eph_pk[64:96] | mac[96:112] | ct[112:]
+         * so the MAC starts at 96 + nf and the ciphertext 16 bytes later. */
+        size_t mac_off = CSM_NONCE_OFFSET + nf;
+        size_t offs[12];
+        size_t noff = 0, oi;
+
+        /* A fresh pair per mode: the server must not learn the client key from
+         * any tampered packet below. */
+        csm_pair(&c, &s);
+        CHECK(s.client_public_key_initialized == 0);
+        CHECK_CSM(naion_csm_client_encrypt_ex(&c, pt, 32, pkt, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &pkt_len, mode),
+                  NAION_CSM_OK);
+        CHECK(pkt_len == naion_csm_client_encrypt_size_ex(32, mode));
+
+        /* First and last byte of every field. */
+        offs[noff++] = CSM_SIG_OFFSET;                      /*   0 signature */
+        offs[noff++] = CSM_SIG_OFFSET + CSM_SIG_BYTES - 1;  /*  63 */
+        offs[noff++] = CSM_XPK_OFFSET;                      /*  64 session X25519 public key */
+        offs[noff++] = CSM_XPK_OFFSET + CSM_XPK_BYTES - 1;  /*  95 */
+        if (nf != 0U) {
+            offs[noff++] = CSM_NONCE_OFFSET;                /*  96 nonce (random mode only) */
+            offs[noff++] = CSM_NONCE_OFFSET + nf - 1;       /* 119 */
+        }
+        offs[noff++] = mac_off;                             /*  96 / 120 mac */
+        offs[noff++] = mac_off + CSM_MAC_BYTES - 1;         /* 111 / 135 */
+        offs[noff++] = mac_off + CSM_MAC_BYTES;             /* 112 / 136 first ciphertext byte */
+        offs[noff++] = pkt_len - 1;                         /* last ciphertext byte */
+
+        for (oi = 0; oi < noff; oi++) {
             size_t off = offs[oi];
             pkt[off] ^= 0xff;
-            out_len = 0;
-            CHECK_CSM(naion_csm_server_decrypt(&s, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len),
+            out_len = 1;
+            CHECK_CSM(naion_csm_server_decrypt_ex(&s, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len, mode),
                       NAION_CSM_ERR_CRYPTO);
+            CHECK(out_len == 0);
             pkt[off] ^= 0xff;
         }
+        /* No tampered packet taught the server the client key, and the packet
+         * with every byte restored still opens. */
+        CHECK(s.client_public_key_initialized == 0);
+        CHECK(naion_is_zero(s.client_ed_public_key, CSM_ED_PK_BYTES) == 1);
+        CHECK_CSM(naion_csm_server_decrypt_ex(&s, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len, mode),
+                  NAION_CSM_OK);
+        CHECK(out_len == 32);
+        CHECK(naion_memcmp(pt, out, 32) == 0);
+        CHECK(s.client_public_key_initialized == 1);
     }
     TEST_END();
 }
@@ -2907,6 +3005,993 @@ static int test_csm_null_errors(void)
         CHECK_CSM(naion_csm_server_create(NULL, seed), NAION_CSM_ERR_INVALID_ARGUMENT);
         CHECK_CSM(naion_csm_server_create(&s, NULL), NAION_CSM_ERR_INVALID_ARGUMENT);
     }
+    TEST_END();
+}
+
+/* ---- 3H. CSM nonce modes (compact / random) ---------------------------- */
+
+/* One C -> S and one S -> C exchange of an n-byte payload through the default
+ * (non-_ex) API, i.e. the compact mode. Checks the packet sizes, the plaintexts
+ * and that the server learns exactly the client's public key. Returns 0 at the
+ * first failed check. */
+static int csm_roundtrip_default(naion_csm_client *c, naion_csm_server *s,
+                                 const unsigned char *pt, size_t n,
+                                 unsigned char *pkt, unsigned char *out)
+{
+    size_t pkt_len = 0, out_len = 0;
+
+    /* C -> S: the plaintext on the wire is client_ed25519_public_key(32) || payload */
+    CHECK_CSM(naion_csm_client_encrypt(c, pt, n, pkt, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &pkt_len),
+              NAION_CSM_OK);
+    CHECK(pkt_len == naion_csm_client_encrypt_size(n));
+    CHECK(pkt_len == CSM_SIG_BYTES + CSM_XPK_BYTES + CSM_MAC_BYTES + CSM_ED_PK_BYTES + n);
+    CHECK_CSM(naion_csm_server_decrypt(s, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len),
+              NAION_CSM_OK);
+    CHECK(out_len == n);
+    CHECK(naion_memcmp(pt, out, n) == 0);
+    CHECK(s->client_public_key_initialized == 1);
+    CHECK(naion_memcmp(s->client_ed_public_key, c->ed_public_key, CSM_ED_PK_BYTES) == 0);
+
+    /* S -> C */
+    CHECK_CSM(naion_csm_server_encrypt(s, pt, n, pkt, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &pkt_len),
+              NAION_CSM_OK);
+    CHECK(pkt_len == naion_csm_server_encrypt_size(n));
+    CHECK(pkt_len == CSM_SIG_BYTES + CSM_XPK_BYTES + CSM_MAC_BYTES + n);
+    CHECK_CSM(naion_csm_client_decrypt(c, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len),
+              NAION_CSM_OK);
+    CHECK(out_len == n);
+    CHECK(naion_memcmp(pt, out, n) == 0);
+    return 1;
+}
+
+/* The same exchange through the _ex API in nonce_mode. */
+static int csm_roundtrip_ex(naion_csm_client *c, naion_csm_server *s,
+                            const unsigned char *pt, size_t n,
+                            unsigned char *pkt, unsigned char *out,
+                            int nonce_mode)
+{
+    size_t nf = csm_nonce_field_bytes(nonce_mode);
+    size_t pkt_len = 0, out_len = 0;
+
+    /* C -> S */
+    CHECK_CSM(naion_csm_client_encrypt_ex(c, pt, n, pkt, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &pkt_len,
+                                          nonce_mode),
+              NAION_CSM_OK);
+    CHECK(pkt_len == naion_csm_client_encrypt_size_ex(n, nonce_mode));
+    CHECK(pkt_len == CSM_SIG_BYTES + CSM_XPK_BYTES + nf + CSM_MAC_BYTES + CSM_ED_PK_BYTES + n);
+    CHECK(pkt_len == NAION_CSM_PACKET_OVERHEAD_EX(nonce_mode) + NAION_CSM_CLIENT_PK_BYTES + n);
+    CHECK_CSM(naion_csm_server_decrypt_ex(s, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len,
+                                          nonce_mode),
+              NAION_CSM_OK);
+    CHECK(out_len == n);
+    CHECK(naion_memcmp(pt, out, n) == 0);
+    CHECK(s->client_public_key_initialized == 1);
+    CHECK(naion_memcmp(s->client_ed_public_key, c->ed_public_key, CSM_ED_PK_BYTES) == 0);
+
+    /* S -> C */
+    CHECK_CSM(naion_csm_server_encrypt_ex(s, pt, n, pkt, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &pkt_len,
+                                          nonce_mode),
+              NAION_CSM_OK);
+    CHECK(pkt_len == naion_csm_server_encrypt_size_ex(n, nonce_mode));
+    CHECK(pkt_len == CSM_SIG_BYTES + CSM_XPK_BYTES + nf + CSM_MAC_BYTES + n);
+    CHECK(pkt_len == NAION_CSM_PACKET_OVERHEAD_EX(nonce_mode) + n);
+    CHECK_CSM(naion_csm_client_decrypt_ex(c, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len,
+                                          nonce_mode),
+              NAION_CSM_OK);
+    CHECK(out_len == n);
+    CHECK(naion_memcmp(pt, out, n) == 0);
+    return 1;
+}
+
+/* T3.58 */
+static int test_csm_nonce_mode_constants(void)
+{
+    /* The macros are read through variables: a CHECK on a constant expression
+     * draws C4127 ("conditional expression is constant") from MSVC /W4. */
+    const int derived = NAION_CSM_NONCE_DERIVED;
+    const int random = NAION_CSM_NONCE_RANDOM;
+    const int client_pk_bytes = NAION_CSM_CLIENT_PK_BYTES;
+    const int datagram_bytes = NAION_CSM_MAX_UDP_DATAGRAM_BYTES;
+    /* [0] = derived (compact) mode, [1] = random mode */
+    const size_t nonce_field[2] = { NAION_CSM_NONCE_FIELD_BYTES(derived),
+                                    NAION_CSM_NONCE_FIELD_BYTES(random) };
+    const size_t overhead[2] = { NAION_CSM_PACKET_OVERHEAD_EX(derived),
+                                 NAION_CSM_PACKET_OVERHEAD_EX(random) };
+    const size_t max_client_payload[2] = { NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES_EX(derived),
+                                           NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES_EX(random) };
+    const size_t max_server_payload[2] = { NAION_CSM_MAX_SERVER_PAYLOAD_BYTES_EX(derived),
+                                           NAION_CSM_MAX_SERVER_PAYLOAD_BYTES_EX(random) };
+    /* the unsuffixed constants */
+    const size_t packet_overhead = NAION_CSM_PACKET_OVERHEAD;
+    const size_t client_payload = NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES;
+    const size_t server_payload = NAION_CSM_MAX_SERVER_PAYLOAD_BYTES;
+    /* the compact mode */
+    const size_t compact_overhead = NAION_CSM_COMPACT_PACKET_OVERHEAD;
+    const size_t compact_client_payload = NAION_CSM_COMPACT_MAX_CLIENT_PAYLOAD_BYTES;
+    const size_t compact_server_payload = NAION_CSM_COMPACT_MAX_SERVER_PAYLOAD_BYTES;
+
+    TEST_BEGIN("test_csm_nonce_mode_constants");
+
+    /* 0 = derived nonce (compact), the default; 1 = random nonce in the packet */
+    CHECK(derived == 0);
+    CHECK(random == 1);
+    CHECK(nonce_field[0] == 0);
+    CHECK(nonce_field[1] == 24);
+    CHECK(nonce_field[1] == CSM_NONCE_BYTES);
+
+    /* Fixed overhead = signature 64 + session X25519 public key 32 + nonce + MAC 16 */
+    CHECK(overhead[0] == 112);
+    CHECK(overhead[1] == 136);
+    CHECK(compact_overhead == 112);
+
+    /* Payload limits inside a 1024-byte datagram */
+    CHECK(compact_client_payload == 880);
+    CHECK(compact_server_payload == 912);
+    CHECK(max_client_payload[0] == 880);
+    CHECK(max_server_payload[0] == 912);
+    CHECK(max_client_payload[1] == 856);
+    CHECK(max_server_payload[1] == 888);
+
+    /* The unsuffixed constants keep the values of the random mode. */
+    CHECK(packet_overhead == 136);
+    CHECK(client_payload == 856);
+    CHECK(server_payload == 888);
+    CHECK(packet_overhead == overhead[1]);
+    CHECK(client_payload == max_client_payload[1]);
+    CHECK(server_payload == max_server_payload[1]);
+    CHECK(packet_overhead != compact_overhead);
+    CHECK(compact_overhead == overhead[0]);
+    CHECK(compact_client_payload == max_client_payload[0]);
+    CHECK(compact_server_payload == max_server_payload[0]);
+
+    /* Each limit fills the datagram exactly, in both modes. */
+    CHECK(compact_client_payload + compact_overhead + (size_t) client_pk_bytes == (size_t) datagram_bytes);
+    CHECK(compact_server_payload + compact_overhead == (size_t) datagram_bytes);
+    CHECK(client_payload + packet_overhead + (size_t) client_pk_bytes == (size_t) datagram_bytes);
+    CHECK(server_payload + packet_overhead == (size_t) datagram_bytes);
+
+    /* The compact mode gains exactly the nonce field. */
+    CHECK(packet_overhead - compact_overhead == CSM_NONCE_BYTES);
+    CHECK(compact_client_payload - client_payload == CSM_NONCE_BYTES);
+    CHECK(compact_server_payload - server_payload == CSM_NONCE_BYTES);
+    TEST_END();
+}
+
+/* T3.59 */
+static int test_csm_size_functions_ex(void)
+{
+    static const size_t plens[] = { 0, 1, 32, 256, NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES,
+                                    NAION_CSM_COMPACT_MAX_CLIENT_PAYLOAD_BYTES };
+    static const int modes[2] = { NAION_CSM_NONCE_DERIVED, NAION_CSM_NONCE_RANDOM };
+    size_t li, mi;
+
+    TEST_BEGIN("test_csm_size_functions_ex");
+    for (mi = 0; mi < 2; mi++) {
+        int mode = modes[mi];
+        size_t nf = csm_nonce_field_bytes(mode);
+
+        for (li = 0; li < sizeof plens / sizeof plens[0]; li++) {
+            size_t n = plens[li];
+            /* sig64 + xpk32 + nonce + mac16 (+ edpk32 for a client packet) + payload */
+            size_t c2s = CSM_SIG_BYTES + CSM_XPK_BYTES + nf + CSM_MAC_BYTES + CSM_ED_PK_BYTES + n;
+            size_t s2c = CSM_SIG_BYTES + CSM_XPK_BYTES + nf + CSM_MAC_BYTES + n;
+
+            CHECK(naion_csm_client_encrypt_size_ex(n, mode) == c2s);
+            CHECK(naion_csm_server_encrypt_size_ex(n, mode) == s2c);
+            CHECK(naion_csm_client_encrypt_size_ex(n, mode) == NAION_CSM_PACKET_OVERHEAD_EX(mode) + CSM_ED_PK_BYTES + n);
+            CHECK(naion_csm_server_encrypt_size_ex(n, mode) == NAION_CSM_PACKET_OVERHEAD_EX(mode) + n);
+            /* decrypt_max_plaintext_size is the inverse of encrypt_size */
+            CHECK(naion_csm_server_decrypt_max_plaintext_size_ex(c2s, mode) == n);
+            CHECK(naion_csm_client_decrypt_max_plaintext_size_ex(s2c, mode) == n);
+            /* a client packet holds the client public key in front of the payload */
+            CHECK(naion_csm_client_decrypt_max_plaintext_size_ex(c2s, mode) == CSM_ED_PK_BYTES + n);
+            /* a packet that is all overhead has room for no payload */
+            CHECK(naion_csm_server_decrypt_max_plaintext_size_ex(c2s - n, mode) == 0);
+            CHECK(naion_csm_client_decrypt_max_plaintext_size_ex(s2c - n, mode) == 0);
+            CHECK(naion_csm_server_decrypt_max_plaintext_size_ex(c2s - n + 1, mode) == 1);
+            CHECK(naion_csm_client_decrypt_max_plaintext_size_ex(s2c - n + 1, mode) == 1);
+        }
+    }
+    /* The random mode costs exactly the nonce field. */
+    for (li = 0; li < sizeof plens / sizeof plens[0]; li++) {
+        size_t n = plens[li];
+
+        CHECK(naion_csm_client_encrypt_size_ex(n, NAION_CSM_NONCE_RANDOM)
+              - naion_csm_client_encrypt_size_ex(n, NAION_CSM_NONCE_DERIVED) == CSM_NONCE_BYTES);
+        CHECK(naion_csm_server_encrypt_size_ex(n, NAION_CSM_NONCE_RANDOM)
+              - naion_csm_server_encrypt_size_ex(n, NAION_CSM_NONCE_DERIVED) == CSM_NONCE_BYTES);
+    }
+    TEST_END();
+}
+
+/* T3.60 */
+static int test_csm_compact_roundtrip(void)
+{
+    /* 857..880 only fit the datagram in the compact mode */
+    static const size_t plens[] = { 1, 16, 24, 25, 32, 100, 255, 256, 257, 512,
+                                    NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES,
+                                    NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES + 1,
+                                    NAION_CSM_COMPACT_MAX_CLIENT_PAYLOAD_BYTES };
+    naion_csm_client c;
+    naion_csm_server s;
+    size_t li, len1 = 0, len2 = 0;
+
+    TEST_BEGIN("test_csm_compact_roundtrip");
+    csm_pair(&c, &s);
+    for (li = 0; li < sizeof plens / sizeof plens[0]; li++) {
+        size_t n = plens[li];
+
+        fill_pattern(g_buf_a, n, 0xe1);
+        CHECK(csm_roundtrip_ex(&c, &s, g_buf_a, n, g_buf_b, g_buf_c, NAION_CSM_NONCE_DERIVED));
+        fill_pattern(g_buf_a, n, 0xe2);
+        CHECK(csm_roundtrip_default(&c, &s, g_buf_a, n, g_buf_b, g_buf_c));
+    }
+
+    /* The nonce is derived from the key pair of the packet, so every packet
+     * must use a fresh session X25519 key pair: two encryptions of the same
+     * plaintext differ in the public key field [64:96], in both directions. */
+    fill_pattern(g_buf_a, 100, 0xe3);
+    CHECK_CSM(naion_csm_client_encrypt(&c, g_buf_a, 100, g_buf_b, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &len1),
+              NAION_CSM_OK);
+    CHECK_CSM(naion_csm_client_encrypt(&c, g_buf_a, 100, g_buf_c, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &len2),
+              NAION_CSM_OK);
+    CHECK(len1 == len2);
+    CHECK(naion_memcmp(g_buf_b + CSM_XPK_OFFSET, g_buf_c + CSM_XPK_OFFSET, CSM_XPK_BYTES) != 0);
+    CHECK_CSM(naion_csm_server_encrypt(&s, g_buf_a, 100, g_buf_b, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &len1),
+              NAION_CSM_OK);
+    CHECK_CSM(naion_csm_server_encrypt(&s, g_buf_a, 100, g_buf_c, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &len2),
+              NAION_CSM_OK);
+    CHECK(len1 == len2);
+    CHECK(naion_memcmp(g_buf_b + CSM_XPK_OFFSET, g_buf_c + CSM_XPK_OFFSET, CSM_XPK_BYTES) != 0);
+    TEST_END();
+}
+
+/* T3.61 */
+static int test_csm_random_roundtrip(void)
+{
+    static const size_t plens[] = { 1, 16, 24, 25, 32, 100, 255, 256, 257, 512,
+                                    NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES };
+    naion_csm_client c;
+    naion_csm_server s;
+    size_t li, len1 = 0, len2 = 0;
+
+    TEST_BEGIN("test_csm_random_roundtrip");
+    csm_pair(&c, &s);
+    for (li = 0; li < sizeof plens / sizeof plens[0]; li++) {
+        size_t n = plens[li];
+
+        fill_pattern(g_buf_a, n, 0xe4);
+        CHECK(csm_roundtrip_ex(&c, &s, g_buf_a, n, g_buf_b, g_buf_c, NAION_CSM_NONCE_RANDOM));
+    }
+
+    /* The nonce travels in the packet at [96:120] and is random: two
+     * encryptions of the same plaintext differ there, in both directions. */
+    fill_pattern(g_buf_a, 100, 0xe5);
+    CHECK_CSM(naion_csm_client_encrypt_ex(&c, g_buf_a, 100, g_buf_b, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &len1,
+                                          NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_OK);
+    CHECK_CSM(naion_csm_client_encrypt_ex(&c, g_buf_a, 100, g_buf_c, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &len2,
+                                          NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_OK);
+    CHECK(len1 == len2);
+    CHECK(naion_memcmp(g_buf_b + CSM_NONCE_OFFSET, g_buf_c + CSM_NONCE_OFFSET, CSM_NONCE_BYTES) != 0);
+    CHECK_CSM(naion_csm_server_encrypt_ex(&s, g_buf_a, 100, g_buf_b, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &len1,
+                                          NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_OK);
+    CHECK_CSM(naion_csm_server_encrypt_ex(&s, g_buf_a, 100, g_buf_c, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &len2,
+                                          NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_OK);
+    CHECK(len1 == len2);
+    CHECK(naion_memcmp(g_buf_b + CSM_NONCE_OFFSET, g_buf_c + CSM_NONCE_OFFSET, CSM_NONCE_BYTES) != 0);
+    TEST_END();
+}
+
+/* T3.62 */
+static int test_csm_nonce_mode_mismatch(void)
+{
+    static const size_t plens[] = { 1, 16, 24, 25, 32, 64, 200 };
+    naion_csm_client c;
+    naion_csm_server s;
+    unsigned char *pt = g_buf_a, *compact = g_buf_b, *random = g_buf_c;
+    unsigned char out[NAION_CSM_MAX_UDP_DATAGRAM_BYTES];
+    size_t li;
+
+    TEST_BEGIN("test_csm_nonce_mode_mismatch");
+
+    for (li = 0; li < sizeof plens / sizeof plens[0]; li++) {
+        size_t n = plens[li];
+        size_t compact_len = 0, random_len = 0, out_len = 0;
+        /* A compact packet of at most 24 payload bytes is not longer than the
+         * minimum packet of the random mode, so a random-mode receiver rejects
+         * it as malformed. Every other mismatch gets as far as the AEAD, where
+         * the MAC fails. */
+        int compact_as_random = (n <= CSM_NONCE_BYTES) ? NAION_CSM_ERR_INVALID_ARGUMENT
+                                                       : NAION_CSM_ERR_CRYPTO;
+
+        /* A fresh pair per payload size: the genuine packets at the end of an
+         * iteration teach the server the client key. */
+        csm_pair(&c, &s);
+        CHECK(s.client_public_key_initialized == 0);
+        fill_pattern(pt, n, 0xe6);
+        CHECK_CSM(naion_csm_client_encrypt_ex(&c, pt, n, compact, NAION_CSM_MAX_UDP_DATAGRAM_BYTES,
+                                              &compact_len, NAION_CSM_NONCE_DERIVED),
+                  NAION_CSM_OK);
+        CHECK_CSM(naion_csm_client_encrypt_ex(&c, pt, n, random, NAION_CSM_MAX_UDP_DATAGRAM_BYTES,
+                                              &random_len, NAION_CSM_NONCE_RANDOM),
+                  NAION_CSM_OK);
+        CHECK(compact_len + CSM_NONCE_BYTES == random_len);
+
+        /* C -> S: a packet in the wrong mode must not teach the server the client key. */
+        out_len = 1;
+        CHECK_CSM(naion_csm_server_decrypt_ex(&s, compact, compact_len, out, sizeof out, &out_len,
+                                              NAION_CSM_NONCE_RANDOM),
+                  compact_as_random);
+        CHECK(out_len == 0);
+        CHECK(s.client_public_key_initialized == 0);
+        out_len = 1;
+        CHECK_CSM(naion_csm_server_decrypt_ex(&s, random, random_len, out, sizeof out, &out_len,
+                                              NAION_CSM_NONCE_DERIVED),
+                  NAION_CSM_ERR_CRYPTO);
+        CHECK(out_len == 0);
+        CHECK(s.client_public_key_initialized == 0);
+        /* The default API is the compact mode. */
+        out_len = 1;
+        CHECK_CSM(naion_csm_server_decrypt(&s, random, random_len, out, sizeof out, &out_len),
+                  NAION_CSM_ERR_CRYPTO);
+        CHECK(out_len == 0);
+        CHECK(s.client_public_key_initialized == 0);
+        CHECK(naion_is_zero(s.client_ed_public_key, CSM_ED_PK_BYTES) == 1);
+
+        /* Both packets are genuine: each one opens in its own mode. */
+        CHECK_CSM(naion_csm_server_decrypt_ex(&s, compact, compact_len, out, sizeof out, &out_len,
+                                              NAION_CSM_NONCE_DERIVED),
+                  NAION_CSM_OK);
+        CHECK(out_len == n);
+        CHECK(naion_memcmp(pt, out, n) == 0);
+        CHECK(s.client_public_key_initialized == 1);
+        CHECK(naion_memcmp(s.client_ed_public_key, c.ed_public_key, CSM_ED_PK_BYTES) == 0);
+        CHECK_CSM(naion_csm_server_decrypt_ex(&s, random, random_len, out, sizeof out, &out_len,
+                                              NAION_CSM_NONCE_RANDOM),
+                  NAION_CSM_OK);
+        CHECK(out_len == n);
+        CHECK(naion_memcmp(pt, out, n) == 0);
+
+        /* S -> C: same rules. */
+        CHECK_CSM(naion_csm_server_encrypt_ex(&s, pt, n, compact, NAION_CSM_MAX_UDP_DATAGRAM_BYTES,
+                                              &compact_len, NAION_CSM_NONCE_DERIVED),
+                  NAION_CSM_OK);
+        CHECK_CSM(naion_csm_server_encrypt_ex(&s, pt, n, random, NAION_CSM_MAX_UDP_DATAGRAM_BYTES,
+                                              &random_len, NAION_CSM_NONCE_RANDOM),
+                  NAION_CSM_OK);
+        CHECK(compact_len + CSM_NONCE_BYTES == random_len);
+        out_len = 1;
+        CHECK_CSM(naion_csm_client_decrypt_ex(&c, compact, compact_len, out, sizeof out, &out_len,
+                                              NAION_CSM_NONCE_RANDOM),
+                  compact_as_random);
+        CHECK(out_len == 0);
+        out_len = 1;
+        CHECK_CSM(naion_csm_client_decrypt_ex(&c, random, random_len, out, sizeof out, &out_len,
+                                              NAION_CSM_NONCE_DERIVED),
+                  NAION_CSM_ERR_CRYPTO);
+        CHECK(out_len == 0);
+        out_len = 1;
+        CHECK_CSM(naion_csm_client_decrypt(&c, random, random_len, out, sizeof out, &out_len),
+                  NAION_CSM_ERR_CRYPTO);
+        CHECK(out_len == 0);
+        CHECK_CSM(naion_csm_client_decrypt_ex(&c, compact, compact_len, out, sizeof out, &out_len,
+                                              NAION_CSM_NONCE_DERIVED),
+                  NAION_CSM_OK);
+        CHECK(out_len == n);
+        CHECK(naion_memcmp(pt, out, n) == 0);
+        CHECK_CSM(naion_csm_client_decrypt_ex(&c, random, random_len, out, sizeof out, &out_len,
+                                              NAION_CSM_NONCE_RANDOM),
+                  NAION_CSM_OK);
+        CHECK(out_len == n);
+        CHECK(naion_memcmp(pt, out, n) == 0);
+    }
+    TEST_END();
+}
+
+/* T3.63 */
+static int test_csm_compact_tamper_bitflip(void)
+{
+    naion_csm_client c;
+    naion_csm_server s;
+    unsigned char pt[48], *pkt = g_buf_a, *out = g_buf_b;
+    size_t pkt_len = 0, out_len = 0;
+    int dir, want;
+
+    TEST_BEGIN("test_csm_compact_tamper_bitflip");
+    csm_pair(&c, &s);
+    fill_pattern(pt, sizeof pt, 0xe7);
+
+    for (dir = 0; dir < 2; dir++) {
+        size_t off;
+
+        if (dir == 0) {
+            /* C -> S. The server has not seen a packet yet: none of the
+             * tampered packets below may teach it the client key. */
+            CHECK(s.client_public_key_initialized == 0);
+            CHECK_CSM(naion_csm_client_encrypt(&c, pt, sizeof pt, pkt, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &pkt_len),
+                      NAION_CSM_OK);
+            CHECK(pkt_len == NAION_CSM_COMPACT_PACKET_OVERHEAD + CSM_ED_PK_BYTES + sizeof pt);
+        } else {
+            /* S -> C. The genuine packet that closed the C -> S round taught
+             * the server the client key. */
+            CHECK(s.client_public_key_initialized == 1);
+            CHECK_CSM(naion_csm_server_encrypt(&s, pt, sizeof pt, pkt, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &pkt_len),
+                      NAION_CSM_OK);
+            CHECK(pkt_len == NAION_CSM_COMPACT_PACKET_OVERHEAD + sizeof pt);
+        }
+
+        /* The signature covers the whole body: public key, MAC and ciphertext.
+         * The client verifies it before touching the AEAD, so it reports
+         * VERIFY_FAILED for every flipped bit. The server opens the AEAD first
+         * and verifies the signature afterwards, so it reports CRYPTO for
+         * everything, a bad signature included. */
+        want = (dir == 1) ? NAION_CSM_ERR_VERIFY_FAILED : NAION_CSM_ERR_CRYPTO;
+
+        /* One bit of every byte: signature [0:64], session X25519 public key
+         * [64:96], MAC [96:112] and ciphertext [112:]. The flipped bit rotates
+         * with the byte offset, so all eight bit positions get exercised. */
+        for (off = 0; off < pkt_len; off++) {
+            unsigned char mask = (unsigned char) (1U << (off & 7U));
+            int rc;
+
+            pkt[off] ^= mask;
+            out_len = 1;
+            if (dir == 1) {
+                rc = naion_csm_client_decrypt(&c, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len);
+            } else {
+                rc = naion_csm_server_decrypt(&s, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len);
+            }
+            if (rc != want) {
+                printf("  ... %s packet, byte %lu bit %u flipped: expected %d, got %d\n",
+                       (dir == 1) ? "S -> C" : "C -> S", (unsigned long) off, (unsigned) (off & 7U),
+                       want, rc);
+            }
+            CHECK(rc == want);
+            CHECK(out_len == 0);
+            if (dir == 0) {
+                CHECK(s.client_public_key_initialized == 0);
+            }
+            pkt[off] ^= mask;
+        }
+        /* With every bit restored the packet opens again. */
+        out_len = 0;
+        if (dir == 1) {
+            CHECK_CSM(naion_csm_client_decrypt(&c, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len),
+                      NAION_CSM_OK);
+        } else {
+            CHECK_CSM(naion_csm_server_decrypt(&s, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len),
+                      NAION_CSM_OK);
+        }
+        CHECK(out_len == sizeof pt);
+        CHECK(naion_memcmp(pt, out, sizeof pt) == 0);
+    }
+    TEST_END();
+}
+
+/* Body of T3.64 for one payload size and nonce mode. pkt_c2s, pkt_s2c and out
+ * are heap blocks of exactly the size the mode needs for n payload bytes, so
+ * that a sanitizer sees every stray write. */
+static int csm_exact_fit_body(naion_csm_client *c, naion_csm_server *s, size_t n, int nonce_mode,
+                              unsigned char *pkt_c2s, unsigned char *pkt_s2c, unsigned char *out)
+{
+    const unsigned char *pt = g_buf_a;
+    size_t c2s_size = naion_csm_client_encrypt_size_ex(n, nonce_mode);
+    size_t s2c_size = naion_csm_server_encrypt_size_ex(n, nonce_mode);
+    size_t pkt_len = 0, out_len = 0;
+
+    /* C -> S encrypt: exactly enough room */
+    CHECK_CSM(naion_csm_client_encrypt_ex(c, pt, n, pkt_c2s, c2s_size, &pkt_len, nonce_mode),
+              NAION_CSM_OK);
+    CHECK(pkt_len == c2s_size);
+    /* one byte short */
+    pkt_len = 1;
+    CHECK_CSM(naion_csm_client_encrypt_ex(c, pt, n, pkt_c2s, c2s_size - 1U, &pkt_len, nonce_mode),
+              NAION_CSM_ERR_BUFFER_TOO_SMALL);
+    CHECK(pkt_len == 0);
+
+    /* C -> S decrypt: n bytes of room is exactly enough. The server needs this
+     * genuine packet before it may send. */
+    CHECK_CSM(naion_csm_server_decrypt_ex(s, pkt_c2s, c2s_size, out, n, &out_len, nonce_mode),
+              NAION_CSM_OK);
+    CHECK(out_len == n);
+    CHECK(naion_memcmp(pt, out, n) == 0);
+    /* one byte short */
+    out_len = 1;
+    CHECK_CSM(naion_csm_server_decrypt_ex(s, pkt_c2s, c2s_size, out, n - 1U, &out_len, nonce_mode),
+              NAION_CSM_ERR_BUFFER_TOO_SMALL);
+    CHECK(out_len == 0);
+
+    /* S -> C encrypt */
+    CHECK_CSM(naion_csm_server_encrypt_ex(s, pt, n, pkt_s2c, s2c_size, &pkt_len, nonce_mode),
+              NAION_CSM_OK);
+    CHECK(pkt_len == s2c_size);
+    pkt_len = 1;
+    CHECK_CSM(naion_csm_server_encrypt_ex(s, pt, n, pkt_s2c, s2c_size - 1U, &pkt_len, nonce_mode),
+              NAION_CSM_ERR_BUFFER_TOO_SMALL);
+    CHECK(pkt_len == 0);
+
+    /* S -> C decrypt */
+    CHECK_CSM(naion_csm_client_decrypt_ex(c, pkt_s2c, s2c_size, out, n, &out_len, nonce_mode),
+              NAION_CSM_OK);
+    CHECK(out_len == n);
+    CHECK(naion_memcmp(pt, out, n) == 0);
+    out_len = 1;
+    CHECK_CSM(naion_csm_client_decrypt_ex(c, pkt_s2c, s2c_size, out, n - 1U, &out_len, nonce_mode),
+              NAION_CSM_ERR_BUFFER_TOO_SMALL);
+    CHECK(out_len == 0);
+    return 1;
+}
+
+/* T3.64 */
+static int test_csm_buffer_exact_fit(void)
+{
+    static const int modes[2] = { NAION_CSM_NONCE_DERIVED, NAION_CSM_NONCE_RANDOM };
+    static const size_t plens[] = { 1, 16, 100, NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES,
+                                    NAION_CSM_COMPACT_MAX_CLIENT_PAYLOAD_BYTES };
+    naion_csm_client c;
+    naion_csm_server s;
+    size_t mi, li;
+
+    TEST_BEGIN("test_csm_buffer_exact_fit");
+    for (mi = 0; mi < 2; mi++) {
+        int mode = modes[mi];
+
+        for (li = 0; li < sizeof plens / sizeof plens[0]; li++) {
+            size_t n = plens[li];
+            size_t c2s_size, s2c_size;
+            unsigned char *pkt_c2s, *pkt_s2c, *out;
+            int ok;
+
+            if (n > NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES_EX(mode)) {
+                continue;               /* over the datagram budget of this mode */
+            }
+            csm_pair(&c, &s);
+            fill_pattern(g_buf_a, n, 0xea);
+            c2s_size = naion_csm_client_encrypt_size_ex(n, mode);
+            s2c_size = naion_csm_server_encrypt_size_ex(n, mode);
+            pkt_c2s = (unsigned char *) malloc(c2s_size);
+            pkt_s2c = (unsigned char *) malloc(s2c_size);
+            out = (unsigned char *) malloc(n);
+            ok = (pkt_c2s != NULL && pkt_s2c != NULL && out != NULL);
+            if (ok) {
+                ok = csm_exact_fit_body(&c, &s, n, mode, pkt_c2s, pkt_s2c, out);
+            }
+            free(pkt_c2s);
+            free(pkt_s2c);
+            free(out);
+            CHECK(ok);
+        }
+    }
+    TEST_END();
+}
+
+/* T3.65 */
+static int test_csm_compact_max_payload(void)
+{
+    naion_csm_client c;
+    naion_csm_server s;
+    unsigned char *pt = g_buf_a, *out = g_buf_c;
+    unsigned char datagram[NAION_CSM_MAX_UDP_DATAGRAM_BYTES];
+    size_t pkt_len = 0, out_len = 0;
+
+    TEST_BEGIN("test_csm_compact_max_payload");
+    csm_pair(&c, &s);
+
+    /* 880 + 32 + 112 == 1024: a client packet fills the datagram exactly. */
+    CHECK(naion_csm_client_encrypt_size_ex(NAION_CSM_COMPACT_MAX_CLIENT_PAYLOAD_BYTES, NAION_CSM_NONCE_DERIVED)
+          == NAION_CSM_MAX_UDP_DATAGRAM_BYTES);
+    fill_pattern(pt, NAION_CSM_COMPACT_MAX_CLIENT_PAYLOAD_BYTES, 0xeb);
+    CHECK_CSM(naion_csm_client_encrypt(&c, pt, NAION_CSM_COMPACT_MAX_CLIENT_PAYLOAD_BYTES, datagram,
+                                       sizeof datagram, &pkt_len),
+              NAION_CSM_OK);
+    CHECK(pkt_len == NAION_CSM_MAX_UDP_DATAGRAM_BYTES);
+    CHECK_CSM(naion_csm_server_decrypt(&s, datagram, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len),
+              NAION_CSM_OK);
+    CHECK(out_len == NAION_CSM_COMPACT_MAX_CLIENT_PAYLOAD_BYTES);
+    CHECK(naion_memcmp(pt, out, out_len) == 0);
+    /* One more payload byte does not fit. */
+    pkt_len = 1;
+    CHECK_CSM(naion_csm_client_encrypt(&c, pt, NAION_CSM_COMPACT_MAX_CLIENT_PAYLOAD_BYTES + 1U, datagram,
+                                       sizeof datagram, &pkt_len),
+              NAION_CSM_ERR_BUFFER_TOO_SMALL);
+    CHECK(pkt_len == 0);
+
+    /* 912 + 112 == 1024: a server packet fills the datagram exactly. */
+    CHECK(naion_csm_server_encrypt_size_ex(NAION_CSM_COMPACT_MAX_SERVER_PAYLOAD_BYTES, NAION_CSM_NONCE_DERIVED)
+          == NAION_CSM_MAX_UDP_DATAGRAM_BYTES);
+    fill_pattern(pt, NAION_CSM_COMPACT_MAX_SERVER_PAYLOAD_BYTES, 0xec);
+    CHECK_CSM(naion_csm_server_encrypt(&s, pt, NAION_CSM_COMPACT_MAX_SERVER_PAYLOAD_BYTES, datagram,
+                                       sizeof datagram, &pkt_len),
+              NAION_CSM_OK);
+    CHECK(pkt_len == NAION_CSM_MAX_UDP_DATAGRAM_BYTES);
+    CHECK_CSM(naion_csm_client_decrypt(&c, datagram, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len),
+              NAION_CSM_OK);
+    CHECK(out_len == NAION_CSM_COMPACT_MAX_SERVER_PAYLOAD_BYTES);
+    CHECK(naion_memcmp(pt, out, out_len) == 0);
+    pkt_len = 1;
+    CHECK_CSM(naion_csm_server_encrypt(&s, pt, NAION_CSM_COMPACT_MAX_SERVER_PAYLOAD_BYTES + 1U, datagram,
+                                       sizeof datagram, &pkt_len),
+              NAION_CSM_ERR_BUFFER_TOO_SMALL);
+    CHECK(pkt_len == 0);
+
+    /* The 24 payload bytes that the random mode had to spend on the nonce are
+     * available by default now: 857 and 889 round trip. */
+    fill_pattern(pt, NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES + 1U, 0xed);
+    CHECK_CSM(naion_csm_client_encrypt(&c, pt, NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES + 1U, datagram,
+                                       sizeof datagram, &pkt_len),
+              NAION_CSM_OK);
+    CHECK(pkt_len == NAION_CSM_COMPACT_PACKET_OVERHEAD + CSM_ED_PK_BYTES + NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES + 1U);
+    CHECK(pkt_len < NAION_CSM_MAX_UDP_DATAGRAM_BYTES);
+    CHECK_CSM(naion_csm_server_decrypt(&s, datagram, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len),
+              NAION_CSM_OK);
+    CHECK(out_len == NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES + 1U);
+    CHECK(naion_memcmp(pt, out, out_len) == 0);
+    fill_pattern(pt, NAION_CSM_MAX_SERVER_PAYLOAD_BYTES + 1U, 0xee);
+    CHECK_CSM(naion_csm_server_encrypt(&s, pt, NAION_CSM_MAX_SERVER_PAYLOAD_BYTES + 1U, datagram,
+                                       sizeof datagram, &pkt_len),
+              NAION_CSM_OK);
+    CHECK(pkt_len == NAION_CSM_COMPACT_PACKET_OVERHEAD + NAION_CSM_MAX_SERVER_PAYLOAD_BYTES + 1U);
+    CHECK(pkt_len < NAION_CSM_MAX_UDP_DATAGRAM_BYTES);
+    CHECK_CSM(naion_csm_client_decrypt(&c, datagram, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len),
+              NAION_CSM_OK);
+    CHECK(out_len == NAION_CSM_MAX_SERVER_PAYLOAD_BYTES + 1U);
+    CHECK(naion_memcmp(pt, out, out_len) == 0);
+
+    /* The random mode keeps the legacy limits: 856 and 888 fill the datagram,
+     * one more byte does not fit. */
+    fill_pattern(pt, NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES, 0xef);
+    CHECK_CSM(naion_csm_client_encrypt_ex(&c, pt, NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES, datagram, sizeof datagram,
+                                          &pkt_len, NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_OK);
+    CHECK(pkt_len == NAION_CSM_MAX_UDP_DATAGRAM_BYTES);
+    CHECK_CSM(naion_csm_server_decrypt_ex(&s, datagram, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len,
+                                          NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_OK);
+    CHECK(out_len == NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES);
+    CHECK(naion_memcmp(pt, out, out_len) == 0);
+    pkt_len = 1;
+    CHECK_CSM(naion_csm_client_encrypt_ex(&c, pt, NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES + 1U, datagram, sizeof datagram,
+                                          &pkt_len, NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_ERR_BUFFER_TOO_SMALL);
+    CHECK(pkt_len == 0);
+    fill_pattern(pt, NAION_CSM_MAX_SERVER_PAYLOAD_BYTES, 0xf0);
+    CHECK_CSM(naion_csm_server_encrypt_ex(&s, pt, NAION_CSM_MAX_SERVER_PAYLOAD_BYTES, datagram, sizeof datagram,
+                                          &pkt_len, NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_OK);
+    CHECK(pkt_len == NAION_CSM_MAX_UDP_DATAGRAM_BYTES);
+    CHECK_CSM(naion_csm_client_decrypt_ex(&c, datagram, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len,
+                                          NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_OK);
+    CHECK(out_len == NAION_CSM_MAX_SERVER_PAYLOAD_BYTES);
+    CHECK(naion_memcmp(pt, out, out_len) == 0);
+    pkt_len = 1;
+    CHECK_CSM(naion_csm_server_encrypt_ex(&s, pt, NAION_CSM_MAX_SERVER_PAYLOAD_BYTES + 1U, datagram, sizeof datagram,
+                                          &pkt_len, NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_ERR_BUFFER_TOO_SMALL);
+    CHECK(pkt_len == 0);
+    TEST_END();
+}
+
+/* T3.66 */
+static int test_csm_nonce_mode_nonzero(void)
+{
+    /* nonce_mode is a switch: every value other than 0 is the random mode. */
+    static const int nonzero[] = { NAION_CSM_NONCE_RANDOM, 2, 7, 255, -1, INT_MAX };
+    static const size_t plens[] = { 0, 1, 100, NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES };
+    naion_csm_client c;
+    naion_csm_server s;
+    unsigned char *pt = g_buf_a, *pkt = g_buf_b, *out = g_buf_c;
+    size_t li, mi, pkt_len = 0, out_len = 0;
+
+    TEST_BEGIN("test_csm_nonce_mode_nonzero");
+    for (mi = 0; mi < sizeof nonzero / sizeof nonzero[0]; mi++) {
+        int mode = nonzero[mi];
+
+        CHECK(NAION_CSM_NONCE_FIELD_BYTES(mode) == CSM_NONCE_BYTES);
+        CHECK(NAION_CSM_PACKET_OVERHEAD_EX(mode) == 136);
+        CHECK(NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES_EX(mode) == 856);
+        CHECK(NAION_CSM_MAX_SERVER_PAYLOAD_BYTES_EX(mode) == 888);
+        for (li = 0; li < sizeof plens / sizeof plens[0]; li++) {
+            size_t n = plens[li];
+
+            CHECK(naion_csm_client_encrypt_size_ex(n, mode)
+                  == naion_csm_client_encrypt_size_ex(n, NAION_CSM_NONCE_RANDOM));
+            CHECK(naion_csm_server_encrypt_size_ex(n, mode)
+                  == naion_csm_server_encrypt_size_ex(n, NAION_CSM_NONCE_RANDOM));
+            CHECK(naion_csm_client_decrypt_max_plaintext_size_ex(n, mode)
+                  == naion_csm_client_decrypt_max_plaintext_size_ex(n, NAION_CSM_NONCE_RANDOM));
+            CHECK(naion_csm_server_decrypt_max_plaintext_size_ex(n, mode)
+                  == naion_csm_server_decrypt_max_plaintext_size_ex(n, NAION_CSM_NONCE_RANDOM));
+        }
+    }
+
+    /* A sender that passes an arbitrary non-zero mode (7) talks to a receiver
+     * in the random mode and the other way round, in both directions. */
+    csm_pair(&c, &s);
+    fill_pattern(pt, 100, 0xf1);
+    for (mi = 0; mi < 2; mi++) {
+        int send_mode = (mi == 0) ? 7 : NAION_CSM_NONCE_RANDOM;
+        int recv_mode = (mi == 0) ? NAION_CSM_NONCE_RANDOM : 7;
+
+        CHECK_CSM(naion_csm_client_encrypt_ex(&c, pt, 100, pkt, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &pkt_len,
+                                             send_mode),
+                  NAION_CSM_OK);
+        CHECK(pkt_len == naion_csm_client_encrypt_size_ex(100, NAION_CSM_NONCE_RANDOM));
+        CHECK_CSM(naion_csm_server_decrypt_ex(&s, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len,
+                                             recv_mode),
+                  NAION_CSM_OK);
+        CHECK(out_len == 100);
+        CHECK(naion_memcmp(pt, out, 100) == 0);
+        CHECK_CSM(naion_csm_server_encrypt_ex(&s, pt, 100, pkt, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &pkt_len,
+                                             send_mode),
+                  NAION_CSM_OK);
+        CHECK(pkt_len == naion_csm_server_encrypt_size_ex(100, NAION_CSM_NONCE_RANDOM));
+        CHECK_CSM(naion_csm_client_decrypt_ex(&c, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len,
+                                             recv_mode),
+                  NAION_CSM_OK);
+        CHECK(out_len == 100);
+        CHECK(naion_memcmp(pt, out, 100) == 0);
+    }
+    TEST_END();
+}
+
+/* ---- 3I. CSM cross-language test vectors ------------------------------- */
+
+/*
+ * CSM cross-language test vectors. Every implementation (C, C++, Go, Python)
+ * must reproduce these packets byte for byte from:
+ *   client Ed25519 seed = 32 bytes of 0x01
+ *   server Ed25519 seed = 32 bytes of 0x02
+ *   random provider     = fills every request with 0x5A
+ *   payload             = 16 bytes: 00 01 02 ... 0f
+ * Generated from build/vectors/vectors.txt by a script; do not edit by hand.
+ */
+#define VEC_SERVER_ED_PK_BYTES 32
+static const char *const VEC_SERVER_ED_PK =
+    "8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394";
+#define VEC_CLIENT_ED_PK_BYTES 32
+static const char *const VEC_CLIENT_ED_PK =
+    "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c";
+
+#define VEC_C2S_COMPACT_BYTES 160
+static const char *const VEC_C2S_COMPACT =
+    "676f9b6a8cdfa755841a467b2709b5b3cbe4249665bca1f30922237678aedf6e"
+    "714b553b0f27fc4dfff8b1d0ca68d00c8333eaf1c12abf1ce72e8b85bac0100a"
+    "b0d08f35b4683381489afb32825e59152d47d19bc9e050d6d5a954984c9d1e2c"
+    "1f639c2334f0089bcb0a7d5da997c2016e84fa6a6df29e24e4aa8d4b394b9b98"
+    "0e0e11f7bf5b7f4fbce4435ba5d50e4fd432f7121f2b9b97d7fa83a0431d3b5d";
+#define VEC_S2C_COMPACT_BYTES 128
+static const char *const VEC_S2C_COMPACT =
+    "0c4c0249692bc2852662efe431530e03f94237b589ad2c53ed758101eca18f2c"
+    "139ef42b1437b77c775dfd59e93dd1dcc48f44547cd631f4fcbc31f266dc6708"
+    "b0d08f35b4683381489afb32825e59152d47d19bc9e050d6d5a954984c9d1e2c"
+    "86345b488d8ff6fdec5f09c153d04202f0db445448e1f320021649bb4d717143";
+
+#define VEC_C2S_RANDOM_BYTES 184
+static const char *const VEC_C2S_RANDOM =
+    "987f308ffecb2c195194c1f81b1c78db264b1d47073a009853869bb1f5ccfe84"
+    "048317f7173b61bc57a91e6bf194221ebcbb6166dc6ccd83d7916ea7246dbd0c"
+    "b0d08f35b4683381489afb32825e59152d47d19bc9e050d6d5a954984c9d1e2c"
+    "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5afbae93e8305a23e3"
+    "a08f3f6d4cec110a364beb3d7e7c30a008b53895752c490bf48fab438eb09a71"
+    "e7584cb6b0b7d9f0f6907d93f078090e34e100884d11ca5f";
+#define VEC_S2C_RANDOM_BYTES 152
+static const char *const VEC_S2C_RANDOM =
+    "82b009cb900f66e2004ad257680ed111c586517cffcaae8cf9c0c020b628c5ea"
+    "c8700f4af571821ddf8442e7358f60b221f782aa5b8a6a3f2f2392a0a4365808"
+    "b0d08f35b4683381489afb32825e59152d47d19bc9e050d6d5a954984c9d1e2c"
+    "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5af77b969223bfbf7e"
+    "b79137cb22dad8aba92a7a99f5d08ba76c494c33b0d09b6f";
+
+#define HEX_DECODE_ERROR ((size_t) -1)
+
+static int hex_nibble(char c)
+{
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
+    return -1;
+}
+
+/* Decode a hex string into out (at most cap bytes). Returns the number of
+ * bytes, or HEX_DECODE_ERROR for a malformed string or a full buffer. */
+static size_t hex_to_bytes(const char *hex, unsigned char *out, size_t cap)
+{
+    size_t n = 0;
+
+    while (hex[0] != '\0' && hex[1] != '\0') {
+        int hi = hex_nibble(hex[0]);
+        int lo = hex_nibble(hex[1]);
+
+        if (hi < 0 || lo < 0 || n >= cap) {
+            return HEX_DECODE_ERROR;
+        }
+        out[n] = (unsigned char) ((hi << 4) | lo);
+        n++;
+        hex += 2;
+    }
+    return (hex[0] != '\0') ? HEX_DECODE_ERROR : n;      /* odd length */
+}
+
+/* Byte-for-byte comparison of got[0..got_len) with a hex-encoded reference
+ * vector. On a mismatch prints where the two differ. */
+static int vec_equal(const char *name, const unsigned char *got, size_t got_len,
+                     const char *hex)
+{
+    unsigned char ref[NAION_CSM_MAX_UDP_DATAGRAM_BYTES];
+    size_t ref_len = hex_to_bytes(hex, ref, sizeof ref);
+    size_t i;
+
+    if (ref_len == HEX_DECODE_ERROR) {
+        printf("  ... vector %s: malformed hex string\n", name);
+        return 0;
+    }
+    if (got_len != ref_len) {
+        printf("  ... vector %s: got %lu bytes, expected %lu\n",
+               name, (unsigned long) got_len, (unsigned long) ref_len);
+        return 0;
+    }
+    for (i = 0; i < ref_len; i++) {
+        if (got[i] != ref[i]) {
+            printf("  ... vector %s: byte %lu differs (got %02x, expected %02x)\n",
+                   name, (unsigned long) i, got[i], ref[i]);
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* Fixed random provider of the vectors: every buffer is filled with 0x5A,
+ * whatever its size. */
+static void randombytes_fixed_5a(void *const buf, const size_t size)
+{
+    memset(buf, 0x5a, size);
+}
+
+/* Run body() with the fixed provider installed, and always restore the default
+ * provider afterwards, also when a CHECK made body() return early. */
+static int run_with_fixed_rng(int (*body)(void))
+{
+    int ok;
+
+    naion_set_random_provider(randombytes_fixed_5a);
+    ok = body();
+    naion_set_random_provider(NULL);
+    return ok;
+}
+
+/* The client/server pair of the vectors: client seed = 32 x 0x01,
+ * server seed = 32 x 0x02. */
+static void csm_vector_pair(naion_csm_client *c, naion_csm_server *s)
+{
+    unsigned char cseed[32], sseed[32];
+
+    memset(cseed, 0x01, sizeof cseed);
+    memset(sseed, 0x02, sizeof sseed);
+    (void) naion_csm_server_create(s, sseed);
+    (void) naion_csm_client_create(c, cseed, s->ed_public_key);
+}
+
+/* Body of T3.67; runs with the fixed random provider. */
+static int csm_vectors_body(void)
+{
+    static const unsigned char payload[16] = {
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f
+    };
+    unsigned char nonce_5a[CSM_NONCE_BYTES];
+    unsigned char ref[VEC_S2C_COMPACT_BYTES], ref2[VEC_S2C_RANDOM_BYTES];
+    naion_csm_client c;
+    naion_csm_server s;
+    unsigned char *pkt = g_buf_a, *again = g_buf_b, *out = g_buf_c;
+    size_t pkt_len = 0, again_len = 0, out_len = 0;
+    size_t c2s_gain, s2c_gain;
+
+    TEST_BEGIN("test_csm_cross_language_vectors");
+    memset(nonce_5a, 0x5a, sizeof nonce_5a);
+    csm_vector_pair(&c, &s);
+    CHECK(vec_equal("server_ed_pk", s.ed_public_key, CSM_ED_PK_BYTES, VEC_SERVER_ED_PK));
+    CHECK(vec_equal("client_ed_pk", c.ed_public_key, CSM_ED_PK_BYTES, VEC_CLIENT_ED_PK));
+
+    /* ---- compact mode, the default: no nonce field ---- */
+    CHECK_CSM(naion_csm_client_encrypt(&c, payload, sizeof payload, pkt, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &pkt_len),
+              NAION_CSM_OK);
+    CHECK(pkt_len == VEC_C2S_COMPACT_BYTES);
+    CHECK(vec_equal("c2s_compact", pkt, pkt_len, VEC_C2S_COMPACT));
+    /* The explicit derived mode is the very same packet. */
+    CHECK_CSM(naion_csm_client_encrypt_ex(&c, payload, sizeof payload, again, NAION_CSM_MAX_UDP_DATAGRAM_BYTES,
+                                          &again_len, NAION_CSM_NONCE_DERIVED),
+              NAION_CSM_OK);
+    CHECK(again_len == pkt_len);
+    CHECK(naion_memcmp(pkt, again, pkt_len) == 0);
+    /* The vector is a genuine packet. */
+    CHECK_CSM(naion_csm_server_decrypt(&s, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len),
+              NAION_CSM_OK);
+    CHECK(out_len == sizeof payload);
+    CHECK(naion_memcmp(payload, out, sizeof payload) == 0);
+    CHECK(s.client_public_key_initialized == 1);
+
+    CHECK_CSM(naion_csm_server_encrypt(&s, payload, sizeof payload, pkt, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &pkt_len),
+              NAION_CSM_OK);
+    CHECK(pkt_len == VEC_S2C_COMPACT_BYTES);
+    CHECK(vec_equal("s2c_compact", pkt, pkt_len, VEC_S2C_COMPACT));
+    CHECK_CSM(naion_csm_client_decrypt(&c, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len),
+              NAION_CSM_OK);
+    CHECK(out_len == sizeof payload);
+    CHECK(naion_memcmp(payload, out, sizeof payload) == 0);
+
+    /* ---- random mode: nonce[96:120] = 24 x 0x5A from the fixed provider ---- */
+    CHECK_CSM(naion_csm_client_encrypt_ex(&c, payload, sizeof payload, pkt, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &pkt_len,
+                                          NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_OK);
+    CHECK(pkt_len == VEC_C2S_RANDOM_BYTES);
+    CHECK(vec_equal("c2s_random", pkt, pkt_len, VEC_C2S_RANDOM));
+    CHECK(naion_memcmp(pkt + CSM_NONCE_OFFSET, nonce_5a, CSM_NONCE_BYTES) == 0);
+    /* Any other non-zero mode is the same random mode. */
+    CHECK_CSM(naion_csm_client_encrypt_ex(&c, payload, sizeof payload, again, NAION_CSM_MAX_UDP_DATAGRAM_BYTES,
+                                          &again_len, 7),
+              NAION_CSM_OK);
+    CHECK(again_len == pkt_len);
+    CHECK(naion_memcmp(pkt, again, pkt_len) == 0);
+    CHECK_CSM(naion_csm_server_decrypt_ex(&s, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len,
+                                          NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_OK);
+    CHECK(out_len == sizeof payload);
+    CHECK(naion_memcmp(payload, out, sizeof payload) == 0);
+
+    CHECK_CSM(naion_csm_server_encrypt_ex(&s, payload, sizeof payload, pkt, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &pkt_len,
+                                          NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_OK);
+    CHECK(pkt_len == VEC_S2C_RANDOM_BYTES);
+    CHECK(vec_equal("s2c_random", pkt, pkt_len, VEC_S2C_RANDOM));
+    CHECK(naion_memcmp(pkt + CSM_NONCE_OFFSET, nonce_5a, CSM_NONCE_BYTES) == 0);
+    CHECK_CSM(naion_csm_client_decrypt_ex(&c, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len,
+                                          NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_OK);
+    CHECK(out_len == sizeof payload);
+    CHECK(naion_memcmp(payload, out, sizeof payload) == 0);
+
+    /* The fixed provider gives every packet the same session key pair, so the
+     * S -> C vectors share the public key at [64:96]; the compact packet is
+     * the random one without its 24-byte nonce field. */
+    CHECK(hex_to_bytes(VEC_S2C_COMPACT, ref, sizeof ref) == sizeof ref);
+    CHECK(hex_to_bytes(VEC_S2C_RANDOM, ref2, sizeof ref2) == sizeof ref2);
+    CHECK(naion_memcmp(ref + CSM_XPK_OFFSET, ref2 + CSM_XPK_OFFSET, CSM_XPK_BYTES) == 0);
+    c2s_gain = VEC_C2S_RANDOM_BYTES - VEC_C2S_COMPACT_BYTES;
+    s2c_gain = VEC_S2C_RANDOM_BYTES - VEC_S2C_COMPACT_BYTES;
+    CHECK(c2s_gain == CSM_NONCE_BYTES);
+    CHECK(s2c_gain == CSM_NONCE_BYTES);
+    return 1;                         /* the caller runs TEST_END() once, after restoring the provider */
+}
+
+/* T3.67 */
+static int test_csm_cross_language_vectors(void)
+{
+    unsigned char ref[VEC_C2S_COMPACT_BYTES];
+    unsigned char pk[CSM_XPK_BYTES], sk[32];
+    int ok;
+
+    TEST_BEGIN("test_csm_cross_language_vectors");
+    ok = run_with_fixed_rng(csm_vectors_body);
+    CHECK(ok);
+
+    /* The fixed provider is gone again: a new session key pair is not the
+     * 0x5A-derived one of the vectors. */
+    CHECK(naion_get_random_provider() != NULL);
+    CHECK(naion_get_random_provider() != randombytes_fixed_5a);
+    CHECK_OK(naion_box_keypair(pk, sk));
+    CHECK(hex_to_bytes(VEC_C2S_COMPACT, ref, sizeof ref) == sizeof ref);
+    CHECK(naion_memcmp(pk, ref + CSM_XPK_OFFSET, CSM_XPK_BYTES) != 0);
     TEST_END();
 }
 
@@ -3251,25 +4336,66 @@ static int test_csm_ca_wipe(void)
 /* T4.14 */
 static int test_csm_ca_tamper(void)
 {
+    static const int modes[2] = { NAION_CSM_NONCE_DERIVED, NAION_CSM_NONCE_RANDOM };
     naion_csm_ca_client c;
     naion_csm_ca_server s;
     unsigned char pt[32], *pkt = g_buf_a, *out = g_buf_b;
     size_t pkt_len = 0, out_len = 0;
-    size_t offs[] = { 0, 63, 64, 95, 96, 119, 120, 135, 136 };
-    size_t oi;
+    int mi;
 
     TEST_BEGIN("test_csm_ca_tamper");
-    ca_handshake_pair(&c, &s);
     fill_pattern(pt, 32, 0xa4);
-    CHECK_CSM(naion_csm_ca_client_encrypt(&c, pt, 32, pkt, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &pkt_len),
-              NAION_CSM_OK);
-    for (oi = 0; oi < sizeof offs / sizeof offs[0]; oi++) {
-        size_t off = offs[oi];
-        pkt[off] ^= 0xff;
-        out_len = 0;
-        CHECK_CSM(naion_csm_ca_server_decrypt(&s, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len),
-                  NAION_CSM_ERR_CRYPTO);
-        pkt[off] ^= 0xff;
+
+    for (mi = 0; mi < 2; mi++) {
+        int mode = modes[mi];
+        size_t nf = csm_nonce_field_bytes(mode);
+        /* Same layout as Layer 3:
+         *   random:  sig[0:64] | eph_pk[64:96] | nonce[96:120] | mac[120:136] | ct[136:]
+         *   compact: sig[0:64] | eph_pk[64:96] | mac[96:112] | ct[112:] */
+        size_t mac_off = CSM_NONCE_OFFSET + nf;
+        size_t offs[12];
+        size_t noff = 0, oi;
+
+        /* A fresh pair per mode: the server must not learn the client key from
+         * any tampered packet below. */
+        ca_handshake_pair(&c, &s);
+        CHECK(s.client_key_verified == 0);
+        CHECK_CSM(naion_csm_ca_client_encrypt_ex(&c, pt, 32, pkt, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &pkt_len, mode),
+                  NAION_CSM_OK);
+        CHECK(pkt_len == naion_csm_ca_client_encrypt_size_ex(32, mode));
+
+        /* First and last byte of every field. */
+        offs[noff++] = CSM_SIG_OFFSET;                      /*   0 signature */
+        offs[noff++] = CSM_SIG_OFFSET + CSM_SIG_BYTES - 1;  /*  63 */
+        offs[noff++] = CSM_XPK_OFFSET;                      /*  64 session X25519 public key */
+        offs[noff++] = CSM_XPK_OFFSET + CSM_XPK_BYTES - 1;  /*  95 */
+        if (nf != 0U) {
+            offs[noff++] = CSM_NONCE_OFFSET;                /*  96 nonce (random mode only) */
+            offs[noff++] = CSM_NONCE_OFFSET + nf - 1;       /* 119 */
+        }
+        offs[noff++] = mac_off;                             /*  96 / 120 mac */
+        offs[noff++] = mac_off + CSM_MAC_BYTES - 1;         /* 111 / 135 */
+        offs[noff++] = mac_off + CSM_MAC_BYTES;             /* 112 / 136 first ciphertext byte */
+        offs[noff++] = pkt_len - 1;                         /* last ciphertext byte */
+
+        for (oi = 0; oi < noff; oi++) {
+            size_t off = offs[oi];
+            pkt[off] ^= 0xff;
+            out_len = 1;
+            CHECK_CSM(naion_csm_ca_server_decrypt_ex(&s, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len, mode),
+                      NAION_CSM_ERR_CRYPTO);
+            CHECK(out_len == 0);
+            pkt[off] ^= 0xff;
+        }
+        /* No tampered packet taught the server the client key, and the packet
+         * with every byte restored still opens. */
+        CHECK(s.client_key_verified == 0);
+        CHECK(naion_is_zero(s.client_ed_public_key, CSM_ED_PK_BYTES) == 1);
+        CHECK_CSM(naion_csm_ca_server_decrypt_ex(&s, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len, mode),
+                  NAION_CSM_OK);
+        CHECK(out_len == 32);
+        CHECK(naion_memcmp(pt, out, 32) == 0);
+        CHECK(s.client_key_verified == 1);
     }
     TEST_END();
 }
@@ -3335,6 +4461,330 @@ static int test_csm_ca_null_errors(void)
     CHECK_CSM(naion_csm_ca_server_decrypt(&s, NULL, 32, buf, sizeof buf, &len), NAION_CSM_ERR_INVALID_ARGUMENT);
     CHECK_CSM(naion_csm_ca_server_decrypt(&s, buf, 32, NULL, sizeof buf, &len), NAION_CSM_ERR_INVALID_ARGUMENT);
     CHECK_CSM(naion_csm_ca_server_decrypt(&s, buf, 32, buf, sizeof buf, NULL), NAION_CSM_ERR_INVALID_ARGUMENT);
+    TEST_END();
+}
+
+/* ---- 4D. CSM-CA nonce modes -------------------------------------------- */
+
+/* One C -> S and one S -> C exchange of an n-byte payload after the handshake,
+ * with the _ex API in nonce_mode. Same checks as csm_roundtrip_ex(). */
+static int csm_ca_roundtrip_ex(naion_csm_ca_client *c, naion_csm_ca_server *s,
+                               const unsigned char *pt, size_t n,
+                               unsigned char *pkt, unsigned char *out, int nonce_mode)
+{
+    size_t nf = csm_nonce_field_bytes(nonce_mode);
+    size_t pkt_len = 0, out_len = 0;
+
+    /* C -> S */
+    CHECK_CSM(naion_csm_ca_client_encrypt_ex(c, pt, n, pkt, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &pkt_len,
+                                             nonce_mode),
+              NAION_CSM_OK);
+    CHECK(pkt_len == naion_csm_ca_client_encrypt_size_ex(n, nonce_mode));
+    CHECK(pkt_len == CSM_SIG_BYTES + CSM_XPK_BYTES + nf + CSM_MAC_BYTES + CSM_ED_PK_BYTES + n);
+    CHECK_CSM(naion_csm_ca_server_decrypt_ex(s, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len,
+                                             nonce_mode),
+              NAION_CSM_OK);
+    CHECK(out_len == n);
+    CHECK(naion_memcmp(pt, out, n) == 0);
+    CHECK(s->client_key_verified == 1);
+    CHECK(naion_memcmp(s->client_ed_public_key, c->ed_public_key, CSM_ED_PK_BYTES) == 0);
+
+    /* S -> C */
+    CHECK_CSM(naion_csm_ca_server_encrypt_ex(s, pt, n, pkt, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &pkt_len,
+                                             nonce_mode),
+              NAION_CSM_OK);
+    CHECK(pkt_len == naion_csm_ca_server_encrypt_size_ex(n, nonce_mode));
+    CHECK(pkt_len == CSM_SIG_BYTES + CSM_XPK_BYTES + nf + CSM_MAC_BYTES + n);
+    CHECK_CSM(naion_csm_ca_client_decrypt_ex(c, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len,
+                                             nonce_mode),
+              NAION_CSM_OK);
+    CHECK(out_len == n);
+    CHECK(naion_memcmp(pt, out, n) == 0);
+    return 1;
+}
+
+/* T4.16 */
+static int test_csm_ca_size_functions_ex(void)
+{
+    static const size_t plens[] = { 0, 1, 32, 256, NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES,
+                                    NAION_CSM_COMPACT_MAX_CLIENT_PAYLOAD_BYTES };
+    static const int modes[] = { NAION_CSM_NONCE_DERIVED, NAION_CSM_NONCE_RANDOM, 7 };
+    size_t li, mi;
+
+    TEST_BEGIN("test_csm_ca_size_functions_ex");
+    for (mi = 0; mi < sizeof modes / sizeof modes[0]; mi++) {
+        int mode = modes[mi];
+        size_t nf = csm_nonce_field_bytes(mode);
+
+        for (li = 0; li < sizeof plens / sizeof plens[0]; li++) {
+            size_t n = plens[li];
+            size_t c2s = naion_csm_ca_client_encrypt_size_ex(n, mode);
+            size_t s2c = naion_csm_ca_server_encrypt_size_ex(n, mode);
+
+            /* The CA layer reports exactly what Layer 3 reports. */
+            CHECK(c2s == naion_csm_client_encrypt_size_ex(n, mode));
+            CHECK(s2c == naion_csm_server_encrypt_size_ex(n, mode));
+            CHECK(naion_csm_ca_client_decrypt_max_plaintext_size_ex(c2s, mode)
+                  == naion_csm_client_decrypt_max_plaintext_size_ex(c2s, mode));
+            CHECK(naion_csm_ca_client_decrypt_max_plaintext_size_ex(s2c, mode)
+                  == naion_csm_client_decrypt_max_plaintext_size_ex(s2c, mode));
+            CHECK(naion_csm_ca_server_decrypt_max_plaintext_size_ex(c2s, mode)
+                  == naion_csm_server_decrypt_max_plaintext_size_ex(c2s, mode));
+            CHECK(naion_csm_ca_server_decrypt_max_plaintext_size_ex(s2c, mode)
+                  == naion_csm_server_decrypt_max_plaintext_size_ex(s2c, mode));
+            /* which is the wire format: sig64 + xpk32 + nonce + mac16 (+ edpk32) + payload */
+            CHECK(c2s == CSM_SIG_BYTES + CSM_XPK_BYTES + nf + CSM_MAC_BYTES + CSM_ED_PK_BYTES + n);
+            CHECK(s2c == CSM_SIG_BYTES + CSM_XPK_BYTES + nf + CSM_MAC_BYTES + n);
+            CHECK(naion_csm_ca_server_decrypt_max_plaintext_size_ex(c2s, mode) == n);
+            CHECK(naion_csm_ca_client_decrypt_max_plaintext_size_ex(s2c, mode) == n);
+        }
+    }
+    /* The non-_ex CA size helpers are the compact mode, as in Layer 3. */
+    for (li = 0; li < sizeof plens / sizeof plens[0]; li++) {
+        size_t n = plens[li];
+
+        CHECK(naion_csm_ca_client_encrypt_size(n) == naion_csm_ca_client_encrypt_size_ex(n, NAION_CSM_NONCE_DERIVED));
+        CHECK(naion_csm_ca_server_encrypt_size(n) == naion_csm_ca_server_encrypt_size_ex(n, NAION_CSM_NONCE_DERIVED));
+        CHECK(naion_csm_ca_client_decrypt_max_plaintext_size(n)
+              == naion_csm_ca_client_decrypt_max_plaintext_size_ex(n, NAION_CSM_NONCE_DERIVED));
+        CHECK(naion_csm_ca_server_decrypt_max_plaintext_size(n)
+              == naion_csm_ca_server_decrypt_max_plaintext_size_ex(n, NAION_CSM_NONCE_DERIVED));
+    }
+    TEST_END();
+}
+
+/* T4.17 */
+static int test_csm_ca_roundtrip_ex(void)
+{
+    static const int modes[2] = { NAION_CSM_NONCE_DERIVED, NAION_CSM_NONCE_RANDOM };
+    static const size_t plens[] = { 1, 16, 24, 25, 32, 100, 255, 256, 257, 512,
+                                    NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES,
+                                    NAION_CSM_COMPACT_MAX_CLIENT_PAYLOAD_BYTES };
+    naion_csm_ca_client c;
+    naion_csm_ca_server s;
+    size_t mi, li;
+
+    TEST_BEGIN("test_csm_ca_roundtrip_ex");
+    ca_handshake_pair(&c, &s);
+    CHECK(c.server_key_verified == 1);
+    CHECK(s.client_key_verified == 0);
+
+    for (mi = 0; mi < 2; mi++) {
+        int mode = modes[mi];
+
+        for (li = 0; li < sizeof plens / sizeof plens[0]; li++) {
+            size_t n = plens[li];
+
+            if (n > NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES_EX(mode)) {
+                continue;               /* over the datagram budget of this mode */
+            }
+            fill_pattern(g_buf_a, n, 0xb1);
+            CHECK(csm_ca_roundtrip_ex(&c, &s, g_buf_a, n, g_buf_b, g_buf_c, mode));
+        }
+    }
+    TEST_END();
+}
+
+/* T4.18 */
+static int test_csm_ca_nonce_mode_mismatch(void)
+{
+    naion_csm_ca_client c;
+    naion_csm_ca_server s;
+    unsigned char pt[80];
+    unsigned char compact[NAION_CSM_MAX_UDP_DATAGRAM_BYTES];
+    unsigned char random[NAION_CSM_MAX_UDP_DATAGRAM_BYTES];
+    unsigned char out[NAION_CSM_MAX_UDP_DATAGRAM_BYTES];
+    size_t compact_len = 0, random_len = 0, out_len = 0;
+
+    TEST_BEGIN("test_csm_ca_nonce_mode_mismatch");
+    ca_handshake_pair(&c, &s);
+    fill_pattern(pt, sizeof pt, 0xb2);
+
+    /* ---- C -> S: a packet in the wrong mode must not teach the server the client key ---- */
+    CHECK_CSM(naion_csm_ca_client_encrypt_ex(&c, pt, sizeof pt, compact, sizeof compact, &compact_len,
+                                             NAION_CSM_NONCE_DERIVED),
+              NAION_CSM_OK);
+    CHECK_CSM(naion_csm_ca_client_encrypt_ex(&c, pt, sizeof pt, random, sizeof random, &random_len,
+                                             NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_OK);
+    CHECK(compact_len == CSM_SIG_BYTES + CSM_XPK_BYTES + CSM_MAC_BYTES + CSM_ED_PK_BYTES + sizeof pt);
+    CHECK(random_len == compact_len + CSM_NONCE_BYTES);
+    out_len = 1;
+    CHECK_CSM(naion_csm_ca_server_decrypt_ex(&s, compact, compact_len, out, sizeof out, &out_len,
+                                             NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_ERR_CRYPTO);
+    CHECK(out_len == 0);
+    CHECK(s.client_key_verified == 0);
+    out_len = 1;
+    CHECK_CSM(naion_csm_ca_server_decrypt_ex(&s, random, random_len, out, sizeof out, &out_len,
+                                             NAION_CSM_NONCE_DERIVED),
+              NAION_CSM_ERR_CRYPTO);
+    CHECK(out_len == 0);
+    CHECK(s.client_key_verified == 0);
+    /* The default API is the compact mode. */
+    out_len = 1;
+    CHECK_CSM(naion_csm_ca_server_decrypt(&s, random, random_len, out, sizeof out, &out_len),
+              NAION_CSM_ERR_CRYPTO);
+    CHECK(out_len == 0);
+    CHECK(s.client_key_verified == 0);
+    CHECK(naion_is_zero(s.client_ed_public_key, CSM_ED_PK_BYTES) == 1);
+
+    /* Both packets are genuine: each one opens in its own mode. */
+    CHECK_CSM(naion_csm_ca_server_decrypt_ex(&s, compact, compact_len, out, sizeof out, &out_len,
+                                             NAION_CSM_NONCE_DERIVED),
+              NAION_CSM_OK);
+    CHECK(out_len == sizeof pt);
+    CHECK(naion_memcmp(pt, out, sizeof pt) == 0);
+    CHECK(s.client_key_verified == 1);
+    CHECK(naion_memcmp(s.client_ed_public_key, c.ed_public_key, CSM_ED_PK_BYTES) == 0);
+    CHECK_CSM(naion_csm_ca_server_decrypt_ex(&s, random, random_len, out, sizeof out, &out_len,
+                                             NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_OK);
+    CHECK(out_len == sizeof pt);
+    CHECK(naion_memcmp(pt, out, sizeof pt) == 0);
+
+    /* ---- S -> C: same rules ---- */
+    CHECK_CSM(naion_csm_ca_server_encrypt_ex(&s, pt, sizeof pt, compact, sizeof compact, &compact_len,
+                                             NAION_CSM_NONCE_DERIVED),
+              NAION_CSM_OK);
+    CHECK_CSM(naion_csm_ca_server_encrypt_ex(&s, pt, sizeof pt, random, sizeof random, &random_len,
+                                             NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_OK);
+    CHECK(compact_len == CSM_SIG_BYTES + CSM_XPK_BYTES + CSM_MAC_BYTES + sizeof pt);
+    CHECK(random_len == compact_len + CSM_NONCE_BYTES);
+    out_len = 1;
+    CHECK_CSM(naion_csm_ca_client_decrypt_ex(&c, compact, compact_len, out, sizeof out, &out_len,
+                                             NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_ERR_CRYPTO);
+    CHECK(out_len == 0);
+    out_len = 1;
+    CHECK_CSM(naion_csm_ca_client_decrypt_ex(&c, random, random_len, out, sizeof out, &out_len,
+                                             NAION_CSM_NONCE_DERIVED),
+              NAION_CSM_ERR_CRYPTO);
+    CHECK(out_len == 0);
+    out_len = 1;
+    CHECK_CSM(naion_csm_ca_client_decrypt(&c, random, random_len, out, sizeof out, &out_len),
+              NAION_CSM_ERR_CRYPTO);
+    CHECK(out_len == 0);
+    CHECK_CSM(naion_csm_ca_client_decrypt_ex(&c, compact, compact_len, out, sizeof out, &out_len,
+                                             NAION_CSM_NONCE_DERIVED),
+              NAION_CSM_OK);
+    CHECK(out_len == sizeof pt);
+    CHECK(naion_memcmp(pt, out, sizeof pt) == 0);
+    CHECK_CSM(naion_csm_ca_client_decrypt_ex(&c, random, random_len, out, sizeof out, &out_len,
+                                             NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_OK);
+    CHECK(out_len == sizeof pt);
+    CHECK(naion_memcmp(pt, out, sizeof pt) == 0);
+    TEST_END();
+}
+
+/* Body of T4.19; runs with the fixed random provider. */
+static int csm_ca_vectors_body(void)
+{
+    static const unsigned char payload[16] = {
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f
+    };
+    unsigned char cseed[32], sseed[32], ca_seed[32], ca_pk[32], ca_sk[64], ca_sig[64];
+    unsigned char m1[NAION_CSM_CA_CERT_BYTES];
+    naion_csm_ca_client c;
+    naion_csm_ca_server s;
+    unsigned char *pkt = g_buf_a, *out = g_buf_b;
+    size_t pkt_len = 0, out_len = 0;
+
+    TEST_BEGIN("test_csm_ca_cross_language_vectors");
+    /* The client and server seeds of the vectors. The CA only takes part in
+     * the handshake and does not influence the packets. */
+    memset(cseed, 0x01, sizeof cseed);
+    memset(sseed, 0x02, sizeof sseed);
+    derive_key(ca_seed, 32, "csm-vector-ca-seed");
+    CHECK_OK(naion_sign_ed25519_seed_keypair(ca_pk, ca_sk, ca_seed));
+    memset(ca_sig, 0, sizeof ca_sig);
+    CHECK_CSM(naion_csm_ca_server_create(&s, sseed, ca_sig), NAION_CSM_OK);
+    ca_make_cert(ca_seed, s.ed_public_key, ca_sig);
+    memcpy(s.ca_signature, ca_sig, sizeof ca_sig);
+    CHECK_CSM(naion_csm_ca_client_create(&c, cseed, ca_pk), NAION_CSM_OK);
+    CHECK(vec_equal("server_ed_pk", s.ed_public_key, CSM_ED_PK_BYTES, VEC_SERVER_ED_PK));
+    CHECK(vec_equal("client_ed_pk", c.ed_public_key, CSM_ED_PK_BYTES, VEC_CLIENT_ED_PK));
+    CHECK_CSM(naion_csm_ca_handshake_response(&s, m1, sizeof m1, &out_len), NAION_CSM_OK);
+    CHECK_CSM(naion_csm_ca_handshake_verify(&c, m1, out_len), NAION_CSM_OK);
+    CHECK(c.server_key_verified == 1);
+    CHECK(s.client_key_verified == 0);
+
+    /* The four CA _ex size helpers report the sizes of the vectors. */
+    CHECK(naion_csm_ca_client_encrypt_size_ex(sizeof payload, NAION_CSM_NONCE_DERIVED) == VEC_C2S_COMPACT_BYTES);
+    CHECK(naion_csm_ca_server_encrypt_size_ex(sizeof payload, NAION_CSM_NONCE_DERIVED) == VEC_S2C_COMPACT_BYTES);
+    CHECK(naion_csm_ca_client_encrypt_size_ex(sizeof payload, NAION_CSM_NONCE_RANDOM) == VEC_C2S_RANDOM_BYTES);
+    CHECK(naion_csm_ca_server_encrypt_size_ex(sizeof payload, NAION_CSM_NONCE_RANDOM) == VEC_S2C_RANDOM_BYTES);
+    CHECK(naion_csm_ca_client_decrypt_max_plaintext_size_ex(VEC_S2C_COMPACT_BYTES, NAION_CSM_NONCE_DERIVED)
+          == sizeof payload);
+    CHECK(naion_csm_ca_server_decrypt_max_plaintext_size_ex(VEC_C2S_COMPACT_BYTES, NAION_CSM_NONCE_DERIVED)
+          == sizeof payload);
+    CHECK(naion_csm_ca_client_decrypt_max_plaintext_size_ex(VEC_S2C_RANDOM_BYTES, NAION_CSM_NONCE_RANDOM)
+          == sizeof payload);
+    CHECK(naion_csm_ca_server_decrypt_max_plaintext_size_ex(VEC_C2S_RANDOM_BYTES, NAION_CSM_NONCE_RANDOM)
+          == sizeof payload);
+
+    /* The four CA _ex encrypt/decrypt functions reproduce the Layer 3 packets
+     * byte for byte and open them. */
+    /* C -> S, compact */
+    CHECK_CSM(naion_csm_ca_client_encrypt_ex(&c, payload, sizeof payload, pkt, NAION_CSM_MAX_UDP_DATAGRAM_BYTES,
+                                             &pkt_len, NAION_CSM_NONCE_DERIVED),
+              NAION_CSM_OK);
+    CHECK(pkt_len == VEC_C2S_COMPACT_BYTES);
+    CHECK(vec_equal("c2s_compact", pkt, pkt_len, VEC_C2S_COMPACT));
+    CHECK(s.client_key_verified == 0);
+    CHECK_CSM(naion_csm_ca_server_decrypt_ex(&s, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len,
+                                             NAION_CSM_NONCE_DERIVED),
+              NAION_CSM_OK);
+    CHECK(out_len == sizeof payload);
+    CHECK(naion_memcmp(payload, out, sizeof payload) == 0);
+    CHECK(s.client_key_verified == 1);
+    /* S -> C, compact */
+    CHECK_CSM(naion_csm_ca_server_encrypt_ex(&s, payload, sizeof payload, pkt, NAION_CSM_MAX_UDP_DATAGRAM_BYTES,
+                                             &pkt_len, NAION_CSM_NONCE_DERIVED),
+              NAION_CSM_OK);
+    CHECK(pkt_len == VEC_S2C_COMPACT_BYTES);
+    CHECK(vec_equal("s2c_compact", pkt, pkt_len, VEC_S2C_COMPACT));
+    CHECK_CSM(naion_csm_ca_client_decrypt_ex(&c, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len,
+                                             NAION_CSM_NONCE_DERIVED),
+              NAION_CSM_OK);
+    CHECK(out_len == sizeof payload);
+    CHECK(naion_memcmp(payload, out, sizeof payload) == 0);
+    /* C -> S, random */
+    CHECK_CSM(naion_csm_ca_client_encrypt_ex(&c, payload, sizeof payload, pkt, NAION_CSM_MAX_UDP_DATAGRAM_BYTES,
+                                             &pkt_len, NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_OK);
+    CHECK(pkt_len == VEC_C2S_RANDOM_BYTES);
+    CHECK(vec_equal("c2s_random", pkt, pkt_len, VEC_C2S_RANDOM));
+    CHECK_CSM(naion_csm_ca_server_decrypt_ex(&s, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len,
+                                             NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_OK);
+    CHECK(out_len == sizeof payload);
+    CHECK(naion_memcmp(payload, out, sizeof payload) == 0);
+    /* S -> C, random */
+    CHECK_CSM(naion_csm_ca_server_encrypt_ex(&s, payload, sizeof payload, pkt, NAION_CSM_MAX_UDP_DATAGRAM_BYTES,
+                                             &pkt_len, NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_OK);
+    CHECK(pkt_len == VEC_S2C_RANDOM_BYTES);
+    CHECK(vec_equal("s2c_random", pkt, pkt_len, VEC_S2C_RANDOM));
+    CHECK_CSM(naion_csm_ca_client_decrypt_ex(&c, pkt, pkt_len, out, NAION_CSM_MAX_UDP_DATAGRAM_BYTES, &out_len,
+                                             NAION_CSM_NONCE_RANDOM),
+              NAION_CSM_OK);
+    CHECK(out_len == sizeof payload);
+    CHECK(naion_memcmp(payload, out, sizeof payload) == 0);
+    return 1;                         /* the caller runs TEST_END() once, after restoring the provider */
+}
+
+/* T4.19 */
+static int test_csm_ca_cross_language_vectors(void)
+{
+    TEST_BEGIN("test_csm_ca_cross_language_vectors");
+    CHECK(run_with_fixed_rng(csm_ca_vectors_body));
+    /* The fixed provider is gone again. */
+    CHECK(naion_get_random_provider() != NULL);
+    CHECK(naion_get_random_provider() != randombytes_fixed_5a);
     TEST_END();
 }
 
@@ -4446,6 +5896,16 @@ int main(int argc, char **argv)
     RUN(test_csm_buffer_too_small);
     RUN(test_csm_tamper_packet);
     RUN(test_csm_null_errors);
+    RUN(test_csm_nonce_mode_constants);
+    RUN(test_csm_size_functions_ex);
+    RUN(test_csm_compact_roundtrip);
+    RUN(test_csm_random_roundtrip);
+    RUN(test_csm_nonce_mode_mismatch);
+    RUN(test_csm_compact_tamper_bitflip);
+    RUN(test_csm_buffer_exact_fit);
+    RUN(test_csm_compact_max_payload);
+    RUN(test_csm_nonce_mode_nonzero);
+    RUN(test_csm_cross_language_vectors);
 #endif
 
 #if NAION_LAYER_CSM_CA
@@ -4465,6 +5925,10 @@ int main(int argc, char **argv)
     RUN(test_csm_ca_wipe);
     RUN(test_csm_ca_tamper);
     RUN(test_csm_ca_null_errors);
+    RUN(test_csm_ca_size_functions_ex);
+    RUN(test_csm_ca_roundtrip_ex);
+    RUN(test_csm_ca_nonce_mode_mismatch);
+    RUN(test_csm_ca_cross_language_vectors);
 #endif
 
 #if NAION_LAYER_CSM_SESSION

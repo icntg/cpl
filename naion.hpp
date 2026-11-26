@@ -69,6 +69,10 @@ namespace cpl {
         static constexpr size_t MaxClientPayloadBytes = NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES;
         static constexpr size_t MaxServerPayloadBytes = NAION_CSM_MAX_SERVER_PAYLOAD_BYTES;
         static constexpr size_t PacketOverheadBytes = NAION_CSM_PACKET_OVERHEAD;
+        // Derived-nonce (compact) packets have no nonce field: 24 bytes less overhead.
+        static constexpr size_t CompactPacketOverheadBytes = NAION_CSM_COMPACT_PACKET_OVERHEAD;
+        static constexpr size_t CompactMaxClientPayloadBytes = NAION_CSM_COMPACT_MAX_CLIENT_PAYLOAD_BYTES;
+        static constexpr size_t CompactMaxServerPayloadBytes = NAION_CSM_COMPACT_MAX_SERVER_PAYLOAD_BYTES;
 
         class Utility final {
         public:
@@ -279,22 +283,29 @@ namespace cpl {
             const EPK &GetPublicKey() const { return this->edPubKeyC; }
 
             Result<Stream> Encrypt(const Stream &in) override {
+                return this->Encrypt(in, NAION_CSM_NONCE_DERIVED);
+            }
+
+            // nonceMode: NAION_CSM_NONCE_DERIVED (compact packet, no nonce field) or
+            // NAION_CSM_NONCE_RANDOM (random nonce transmitted in the packet).
+            Result<Stream> Encrypt(const Stream &in, int nonceMode) {
                 if (in.empty()) {
                     return Err(cpl::Error(cpl::Error::NoData, "[X] Client Encrypt empty data" CPL_FILE_AND_LINE));
                 }
-                if (in.size() > MaxClientPayloadBytes) {
+                if (in.size() > NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES_EX(nonceMode)) {
                     return Err(cpl::Error(Error::OutOfRange, "[X] Client Encrypt payload too large" CPL_FILE_AND_LINE));
                 }
 
-                Stream out(naion_csm_client_encrypt_size(in.size()));
+                Stream out(naion_csm_client_encrypt_size_ex(in.size(), nonceMode));
                 size_t outSize = 0;
-                const auto r00 = naion_csm_client_encrypt(
+                const auto r00 = naion_csm_client_encrypt_ex(
                     &this->csmClient,
                     in.data(),
                     in.size(),
                     out.data(),
                     out.size(),
-                    &outSize
+                    &outSize,
+                    nonceMode
                 );
                 if (r00 != NAION_CSM_OK) {
                     auto es = strings::Format(
@@ -310,16 +321,22 @@ namespace cpl {
             }
 
             Result<Stream> Decrypt(const Stream &in) override {
-                const size_t maxPlain = naion_csm_client_decrypt_max_plaintext_size(in.size());
+                return this->Decrypt(in, NAION_CSM_NONCE_DERIVED);
+            }
+
+            // The nonceMode must match the mode of the sender.
+            Result<Stream> Decrypt(const Stream &in, int nonceMode) {
+                const size_t maxPlain = naion_csm_client_decrypt_max_plaintext_size_ex(in.size(), nonceMode);
                 Stream out(maxPlain);
                 size_t outSize = 0;
-                const auto r00 = naion_csm_client_decrypt(
+                const auto r00 = naion_csm_client_decrypt_ex(
                     &this->csmClient,
                     in.data(),
                     in.size(),
                     out.data(),
                     out.size(),
-                    &outSize
+                    &outSize,
+                    nonceMode
                 );
                 if (r00 != NAION_CSM_OK) {
                     auto es = strings::Format(
@@ -395,16 +412,22 @@ namespace cpl {
             bool IsClientKeyInitialized() const { return this->ed25519PublicKeyClientInitialized; }
 
             Result<Stream> Decrypt(const Stream &in) override {
-                const size_t maxPlain = naion_csm_server_decrypt_max_plaintext_size(in.size());
+                return this->Decrypt(in, NAION_CSM_NONCE_DERIVED);
+            }
+
+            // The nonceMode must match the mode of the sender.
+            Result<Stream> Decrypt(const Stream &in, int nonceMode) {
+                const size_t maxPlain = naion_csm_server_decrypt_max_plaintext_size_ex(in.size(), nonceMode);
                 Stream out(maxPlain);
                 size_t outSize = 0;
-                const auto r00 = naion_csm_server_decrypt(
+                const auto r00 = naion_csm_server_decrypt_ex(
                     &this->csmServer,
                     in.data(),
                     in.size(),
                     out.data(),
                     out.size(),
-                    &outSize
+                    &outSize,
+                    nonceMode
                 );
                 if (r00 != NAION_CSM_OK) {
                     auto es = strings::Format(
@@ -425,10 +448,16 @@ namespace cpl {
             }
 
             Result<Stream> Encrypt(const Stream &in) override {
+                return this->Encrypt(in, NAION_CSM_NONCE_DERIVED);
+            }
+
+            // nonceMode: NAION_CSM_NONCE_DERIVED (compact packet, no nonce field) or
+            // NAION_CSM_NONCE_RANDOM (random nonce transmitted in the packet).
+            Result<Stream> Encrypt(const Stream &in, int nonceMode) {
                 if (in.empty()) {
                     return Err(cpl::Error(cpl::Error::NoData, "[X] Server Encrypt empty data" CPL_FILE_AND_LINE));
                 }
-                if (in.size() > MaxServerPayloadBytes) {
+                if (in.size() > NAION_CSM_MAX_SERVER_PAYLOAD_BYTES_EX(nonceMode)) {
                     return Err(cpl::Error(Error::OutOfRange, "[X] Server Encrypt payload too large" CPL_FILE_AND_LINE));
                 }
                 if (!this->csmServer.client_public_key_initialized) {
@@ -436,15 +465,16 @@ namespace cpl {
                                           "[X] Server Encrypt client public key is not initialized" CPL_FILE_AND_LINE));
                 }
 
-                Stream out(naion_csm_server_encrypt_size(in.size()));
+                Stream out(naion_csm_server_encrypt_size_ex(in.size(), nonceMode));
                 size_t outSize = 0;
-                const auto r00 = naion_csm_server_encrypt(
+                const auto r00 = naion_csm_server_encrypt_ex(
                     &this->csmServer,
                     in.data(),
                     in.size(),
                     out.data(),
                     out.size(),
-                    &outSize
+                    &outSize,
+                    nonceMode
                 );
                 if (r00 != NAION_CSM_OK) {
                     auto es = strings::Format(

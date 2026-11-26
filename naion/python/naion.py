@@ -78,11 +78,24 @@ BOX_NONCEBYTES_MAX = 24
 BOX_MACBYTES_MAX = 16
 BOX_SEALBYTES_MAX = 48
 
+# Random nonce mode (legacy layout, the nonce travels in the packet).
 CSM_PACKET_OVERHEAD = 136
 CSM_CLIENT_PK_BYTES = 32
 CSM_MAX_UDP_DATAGRAM_BYTES = 1024
 CSM_MAX_CLIENT_PAYLOAD_BYTES = 856
 CSM_MAX_SERVER_PAYLOAD_BYTES = 888
+
+# Nonce mode: the nonce_mode argument of the CSM/CSM-CA methods and size
+# helpers. Sender and receiver must use the same mode.
+#   CSM_NONCE_DERIVED ("compact", the default): the nonce is derived from the
+#       X25519 shared secret of the packet, so the packet has no nonce field.
+#   CSM_NONCE_RANDOM: 24 random bytes, transmitted in the packet.
+CSM_NONCE_DERIVED = 0
+CSM_NONCE_RANDOM = 1
+# Derived (compact) mode: no nonce field, 24 bytes less overhead.
+CSM_COMPACT_PACKET_OVERHEAD = 112
+CSM_COMPACT_MAX_CLIENT_PAYLOAD_BYTES = 880
+CSM_COMPACT_MAX_SERVER_PAYLOAD_BYTES = 912
 
 CSM_CA_CERT_BYTES = 96
 
@@ -1057,10 +1070,10 @@ class CSMClient:
         self.ed_public_key = bytes(32)
         self.server_ed_public_key = bytes(32)
 
-    def encrypt(self, plaintext: bytes) -> bytes:
+    def encrypt(self, plaintext: bytes, nonce_mode: int = CSM_NONCE_DERIVED) -> bytes:
         if len(plaintext) == 0:
             raise CSMNoDataError("no data")
-        out = bytearray(_csm_client_encrypt_size(len(plaintext)))
+        out = bytearray(_csm_client_encrypt_size(len(plaintext), nonce_mode))
         server_xpk = sign_ed25519_pk_to_curve25519(self.server_ed_public_key)
         session_xsk = _fill_random(_X_SK_BYTES)
         session_xpk = scalarmult_curve25519_base(session_xsk)
@@ -1069,14 +1082,16 @@ class CSMClient:
         body_payload = body[32:]
         plain_payload = self.ed_public_key + plaintext
         _csm_internal_seal(plain_payload, server_xpk, session_xsk,
-                           session_xpk, body_payload)
+                           session_xpk, body_payload, nonce_mode)
         body_len = 32 + len(body_payload)
         sig = sign_ed25519_detached(bytes(body[:body_len]), self.ed_secret_key)
         out[:_SIGN_BYTES] = sig
         return bytes(out)
 
-    def decrypt(self, packet: bytes) -> bytes:
-        min_size = _SIGN_BYTES + _X_PK_BYTES + _NONCE_BYTES + _MAC_BYTES
+    def decrypt(self, packet: bytes, nonce_mode: int = CSM_NONCE_DERIVED) -> bytes:
+        # The nonce mode must match the mode of the sender.
+        nonce_field = _csm_internal_nonce_field_bytes(nonce_mode)
+        min_size = _SIGN_BYTES + _X_PK_BYTES + nonce_field + _MAC_BYTES
         if len(packet) <= min_size:
             raise CSMInvalidArgumentError("packet too short")
         sig = packet[:_SIGN_BYTES]
@@ -1086,7 +1101,8 @@ class CSMClient:
         client_xsk = sign_ed25519_sk_to_curve25519(self.ed_secret_key)
         session_xpk = body[:_X_PK_BYTES]
         nonce_cipher = body[_X_PK_BYTES:]
-        pt = _csm_internal_open(nonce_cipher, session_xpk, client_xsk, session_xpk)
+        pt = _csm_internal_open(nonce_cipher, session_xpk, client_xsk, session_xpk,
+                                nonce_mode)
         return pt
 
 
@@ -1104,8 +1120,10 @@ class CSMServer:
         self.client_ed_public_key = None
         self.client_public_key_initialized = False
 
-    def decrypt(self, packet: bytes) -> bytes:
-        min_size = _SIGN_BYTES + _X_PK_BYTES + _NONCE_BYTES + _MAC_BYTES + _ED_PK_BYTES
+    def decrypt(self, packet: bytes, nonce_mode: int = CSM_NONCE_DERIVED) -> bytes:
+        # The nonce mode must match the mode of the sender.
+        nonce_field = _csm_internal_nonce_field_bytes(nonce_mode)
+        min_size = _SIGN_BYTES + _X_PK_BYTES + nonce_field + _MAC_BYTES + _ED_PK_BYTES
         if len(packet) <= min_size:
             raise CSMInvalidArgumentError("packet too short")
         server_xsk = sign_ed25519_sk_to_curve25519(self.ed_secret_key)
@@ -1113,7 +1131,8 @@ class CSMServer:
         body = packet[_SIGN_BYTES:]
         session_xpk = body[:_X_PK_BYTES]
         nonce_cipher = body[_X_PK_BYTES:]
-        opened = _csm_internal_open(nonce_cipher, session_xpk, server_xsk, session_xpk)
+        opened = _csm_internal_open(nonce_cipher, session_xpk, server_xsk, session_xpk,
+                                    nonce_mode)
         if len(opened) <= _ED_PK_BYTES:
             raise CSMCryptoError("decrypted payload too short")
         client_ed_pk = opened[:_ED_PK_BYTES]
@@ -1123,40 +1142,46 @@ class CSMServer:
         self.client_public_key_initialized = True
         return opened[_ED_PK_BYTES:]
 
-    def encrypt(self, plaintext: bytes) -> bytes:
+    def encrypt(self, plaintext: bytes, nonce_mode: int = CSM_NONCE_DERIVED) -> bytes:
         if len(plaintext) == 0:
             raise CSMNoDataError("no data")
         if not self.client_public_key_initialized:
             raise CSMStateError("client key not learned")
-        out = bytearray(_csm_server_encrypt_size(len(plaintext)))
+        out = bytearray(_csm_server_encrypt_size(len(plaintext), nonce_mode))
         client_xpk = sign_ed25519_pk_to_curve25519(self.client_ed_public_key)
         session_xsk = _fill_random(_X_SK_BYTES)
         session_xpk = scalarmult_curve25519_base(session_xsk)
         body = memoryview(out)[_SIGN_BYTES:]
         body[:32] = session_xpk
         body_payload = body[32:]
-        _csm_internal_seal(plaintext, client_xpk, session_xsk, session_xpk, body_payload)
+        _csm_internal_seal(plaintext, client_xpk, session_xsk, session_xpk, body_payload,
+                           nonce_mode)
         body_len = 32 + len(body_payload)
         sig = sign_ed25519_detached(bytes(body[:body_len]), self.ed_secret_key)
         out[:_SIGN_BYTES] = sig
         return bytes(out)
 
 
-def _csm_client_encrypt_size(plaintext_len: int) -> int:
-    return _SIGN_BYTES + _X_PK_BYTES + _NONCE_BYTES + _MAC_BYTES + _ED_PK_BYTES + plaintext_len
+def _csm_packet_overhead(nonce_mode: int = CSM_NONCE_DERIVED) -> int:
+    # NAION_CSM_PACKET_OVERHEAD_EX(mode): signature + session key + [nonce] + mac.
+    return _SIGN_BYTES + _X_PK_BYTES + _csm_internal_nonce_field_bytes(nonce_mode) + _MAC_BYTES
 
 
-def _csm_client_decrypt_max_plaintext_size(packet_len: int) -> int:
-    fixed = _SIGN_BYTES + _X_PK_BYTES + _NONCE_BYTES + _MAC_BYTES
+def _csm_client_encrypt_size(plaintext_len: int, nonce_mode: int = CSM_NONCE_DERIVED) -> int:
+    return _csm_packet_overhead(nonce_mode) + _ED_PK_BYTES + plaintext_len
+
+
+def _csm_client_decrypt_max_plaintext_size(packet_len: int, nonce_mode: int = CSM_NONCE_DERIVED) -> int:
+    fixed = _csm_packet_overhead(nonce_mode)
     return packet_len - fixed if packet_len > fixed else 0
 
 
-def _csm_server_encrypt_size(plaintext_len: int) -> int:
-    return _SIGN_BYTES + _X_PK_BYTES + _NONCE_BYTES + _MAC_BYTES + plaintext_len
+def _csm_server_encrypt_size(plaintext_len: int, nonce_mode: int = CSM_NONCE_DERIVED) -> int:
+    return _csm_packet_overhead(nonce_mode) + plaintext_len
 
 
-def _csm_server_decrypt_max_plaintext_size(packet_len: int) -> int:
-    fixed = _SIGN_BYTES + _X_PK_BYTES + _NONCE_BYTES + _MAC_BYTES + _ED_PK_BYTES
+def _csm_server_decrypt_max_plaintext_size(packet_len: int, nonce_mode: int = CSM_NONCE_DERIVED) -> int:
+    fixed = _csm_packet_overhead(nonce_mode) + _ED_PK_BYTES
     return packet_len - fixed if packet_len > fixed else 0
 
 
@@ -1169,22 +1194,60 @@ def _csm_beforenm(peer_xpk: bytes, self_xsk: bytes) -> bytes:
     return _hchacha20(s, bytes(16))
 
 
-def _csm_internal_seal(plaintext, peer_xpk, self_xsk, aad, out) -> None:
-    nonce = bytearray(_fill_random(_NONCE_BYTES))
-    ekey = _csm_beforenm(peer_xpk, self_xsk)
-    out[:_NONCE_BYTES] = nonce
-    ct, mac = _aead_ietf_encrypt_detached(plaintext, aad, bytes(nonce), ekey)
-    out[_NONCE_BYTES:_NONCE_BYTES + _MAC_BYTES] = mac
-    out[_NONCE_BYTES + _MAC_BYTES:] = ct
+# Length of the nonce field inside the packet: 24 bytes in random mode, none
+# in derived (compact) mode.
+def _csm_internal_nonce_field_bytes(nonce_mode) -> int:
+    return _NONCE_BYTES if nonce_mode != 0 else 0
 
 
-def _csm_internal_open(nonce_cipher, peer_xpk, self_xsk, aad) -> bytes:
-    if len(nonce_cipher) <= _NONCE_BYTES + _MAC_BYTES:
+# KDF input of the derived nonce, exactly 16 ASCII bytes (kdf_in in naion.h).
+_CSM_NONCE_KDF_INPUT = b"naion.csm.nonce."
+
+
+def _csm_internal_derive(peer_xpk: bytes, self_xsk: bytes):
+    """Derive (ekey, nonce) from the X25519 shared secret of one packet.
+
+    Mirrors naion_csm_internal_derive:
+
+        shared = X25519(self_xsk, peer_xpk)            raw 32-byte output
+        ekey   = HChaCha20(key = shared, in = 0x00 * 16)                 (beforenm)
+        nonce  = HChaCha20(key = shared, in = "naion.csm.nonce.")[0..23]
+    """
+    shared = scalarmult_curve25519(self_xsk, peer_xpk)
+    ekey = _hchacha20(shared, bytes(16))
+    derived = _hchacha20(shared, _CSM_NONCE_KDF_INPUT)
+    return ekey, derived[:_NONCE_BYTES]
+
+
+def _csm_internal_seal(plaintext, peer_xpk, self_xsk, aad, out,
+                       nonce_mode: int = CSM_NONCE_DERIVED) -> None:
+    nonce_field = _csm_internal_nonce_field_bytes(nonce_mode)
+    try:
+        ekey, nonce = _csm_internal_derive(peer_xpk, self_xsk)
+    except NaionCryptoError:
+        raise CSMCryptoError("derive failed")
+    if nonce_field != 0:
+        # Random mode: replace the derived nonce and store it in the packet.
+        nonce = _fill_random(_NONCE_BYTES)
+        out[:nonce_field] = nonce
+    ct, mac = _aead_ietf_encrypt_detached(plaintext, aad, nonce, ekey)
+    out[nonce_field:nonce_field + _MAC_BYTES] = mac
+    out[nonce_field + _MAC_BYTES:] = ct
+
+
+def _csm_internal_open(nonce_cipher, peer_xpk, self_xsk, aad,
+                       nonce_mode: int = CSM_NONCE_DERIVED) -> bytes:
+    nonce_field = _csm_internal_nonce_field_bytes(nonce_mode)
+    if len(nonce_cipher) <= nonce_field + _MAC_BYTES:
         raise CSMInvalidArgumentError("nonce_cipher too short")
-    nonce = nonce_cipher[:_NONCE_BYTES]
-    mac = nonce_cipher[_NONCE_BYTES:_NONCE_BYTES + _MAC_BYTES]
-    ciphertext = nonce_cipher[_NONCE_BYTES + _MAC_BYTES:]
-    ekey = _csm_beforenm(peer_xpk, self_xsk)
+    try:
+        ekey, derived_nonce = _csm_internal_derive(peer_xpk, self_xsk)
+    except NaionCryptoError:
+        raise CSMCryptoError("derive failed")
+    # Random mode: the nonce travels in the packet. Derived mode: use the KDF output.
+    nonce = bytes(nonce_cipher[:nonce_field]) if nonce_field != 0 else derived_nonce
+    mac = bytes(nonce_cipher[nonce_field:nonce_field + _MAC_BYTES])
+    ciphertext = bytes(nonce_cipher[nonce_field + _MAC_BYTES:])
     try:
         return _aead_ietf_decrypt_detached(ciphertext, mac, aad, nonce, ekey)
     except NaionCryptoError:
@@ -1228,10 +1291,10 @@ class CSMCAClient:
         self.server_ed_public_key = m1[:_ED_PK_BYTES]
         self.server_key_verified = True
 
-    def encrypt(self, plaintext: bytes) -> bytes:
+    def encrypt(self, plaintext: bytes, nonce_mode: int = CSM_NONCE_DERIVED) -> bytes:
         if len(plaintext) == 0:
             raise CSMNoDataError("no data")
-        out = bytearray(_csm_client_encrypt_size(len(plaintext)))
+        out = bytearray(_csm_client_encrypt_size(len(plaintext), nonce_mode))
         server_xpk = sign_ed25519_pk_to_curve25519(self.server_ed_public_key)
         session_xsk = _fill_random(_X_SK_BYTES)
         session_xpk = scalarmult_curve25519_base(session_xsk)
@@ -1239,14 +1302,17 @@ class CSMCAClient:
         body[:32] = session_xpk
         body_payload = body[32:]
         plain_payload = self.ed_public_key + plaintext
-        _csm_internal_seal(plain_payload, server_xpk, session_xsk, session_xpk, body_payload)
+        _csm_internal_seal(plain_payload, server_xpk, session_xsk, session_xpk, body_payload,
+                           nonce_mode)
         body_len = 32 + len(body_payload)
         sig = sign_ed25519_detached(bytes(body[:body_len]), self.ed_secret_key)
         out[:_SIGN_BYTES] = sig
         return bytes(out)
 
-    def decrypt(self, pkt: bytes) -> bytes:
-        min_size = _SIGN_BYTES + _X_PK_BYTES + _NONCE_BYTES + _MAC_BYTES
+    def decrypt(self, pkt: bytes, nonce_mode: int = CSM_NONCE_DERIVED) -> bytes:
+        # The nonce mode must match the mode of the sender.
+        nonce_field = _csm_internal_nonce_field_bytes(nonce_mode)
+        min_size = _SIGN_BYTES + _X_PK_BYTES + nonce_field + _MAC_BYTES
         if len(pkt) <= min_size:
             raise CSMInvalidArgumentError("packet too short")
         sig = pkt[:_SIGN_BYTES]
@@ -1256,7 +1322,8 @@ class CSMCAClient:
         client_xsk = sign_ed25519_sk_to_curve25519(self.ed_secret_key)
         session_xpk = body[:_X_PK_BYTES]
         nonce_cipher = body[_X_PK_BYTES:]
-        return _csm_internal_open(nonce_cipher, session_xpk, client_xsk, session_xpk)
+        return _csm_internal_open(nonce_cipher, session_xpk, client_xsk, session_xpk,
+                                  nonce_mode)
 
 
 class CSMCAServer:
@@ -1278,24 +1345,27 @@ class CSMCAServer:
     def handshake_response(self) -> bytes:
         return self.ed_public_key + self.ca_signature
 
-    def encrypt(self, plaintext: bytes) -> bytes:
+    def encrypt(self, plaintext: bytes, nonce_mode: int = CSM_NONCE_DERIVED) -> bytes:
         if len(plaintext) == 0:
             raise CSMNoDataError("no data")
-        out = bytearray(_csm_server_encrypt_size(len(plaintext)))
+        out = bytearray(_csm_server_encrypt_size(len(plaintext), nonce_mode))
         client_xpk = sign_ed25519_pk_to_curve25519(self.client_ed_public_key)
         session_xsk = _fill_random(_X_SK_BYTES)
         session_xpk = scalarmult_curve25519_base(session_xsk)
         body = memoryview(out)[_SIGN_BYTES:]
         body[:32] = session_xpk
         body_payload = body[32:]
-        _csm_internal_seal(plaintext, client_xpk, session_xsk, session_xpk, body_payload)
+        _csm_internal_seal(plaintext, client_xpk, session_xsk, session_xpk, body_payload,
+                           nonce_mode)
         body_len = 32 + len(body_payload)
         sig = sign_ed25519_detached(bytes(body[:body_len]), self.ed_secret_key)
         out[:_SIGN_BYTES] = sig
         return bytes(out)
 
-    def decrypt(self, pkt: bytes) -> bytes:
-        min_size = _SIGN_BYTES + _X_PK_BYTES + _NONCE_BYTES + _MAC_BYTES + _ED_PK_BYTES
+    def decrypt(self, pkt: bytes, nonce_mode: int = CSM_NONCE_DERIVED) -> bytes:
+        # The nonce mode must match the mode of the sender.
+        nonce_field = _csm_internal_nonce_field_bytes(nonce_mode)
+        min_size = _SIGN_BYTES + _X_PK_BYTES + nonce_field + _MAC_BYTES + _ED_PK_BYTES
         if len(pkt) <= min_size:
             raise CSMInvalidArgumentError("packet too short")
         server_xsk = sign_ed25519_sk_to_curve25519(self.ed_secret_key)
@@ -1303,7 +1373,8 @@ class CSMCAServer:
         body = pkt[_SIGN_BYTES:]
         session_xpk = body[:_X_PK_BYTES]
         nonce_cipher = body[_X_PK_BYTES:]
-        opened = _csm_internal_open(nonce_cipher, session_xpk, server_xsk, session_xpk)
+        opened = _csm_internal_open(nonce_cipher, session_xpk, server_xsk, session_xpk,
+                                    nonce_mode)
         if len(opened) <= _ED_PK_BYTES:
             raise CSMCryptoError("decrypted payload too short")
         client_ed_pk = opened[:_ED_PK_BYTES]

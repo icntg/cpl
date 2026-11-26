@@ -184,6 +184,7 @@ int main(int argc, char **argv) {
     const char *server_seed_hex;
     int repeat;
     int sleep_before_decrypt_ms;
+    int nonce_mode;
     unsigned char *client_seed = NULL;
     unsigned char *server_seed = NULL;
     size_t client_seed_len = 0U;
@@ -208,6 +209,10 @@ int main(int argc, char **argv) {
     server_seed_hex = arg_value(argc, argv, "--server-seed");
     repeat = arg_int(argc, argv, "--repeat", 1);
     sleep_before_decrypt_ms = arg_int(argc, argv, "--sleep-before-decrypt-ms", 0);
+    /* --nonce-mode N: 0 = NAION_CSM_NONCE_DERIVED (compact packet, the default),
+     * any other value = NAION_CSM_NONCE_RANDOM (24-byte nonce in the packet).
+     * The peer on the other side must use the same mode. */
+    nonce_mode = arg_int(argc, argv, "--nonce-mode", 0);
     if (client_seed_hex == NULL || server_seed_hex == NULL) {
         fail("client-seed and server-seed are required", -1);
     }
@@ -239,7 +244,7 @@ int main(int argc, char **argv) {
         if (payload_b64 == NULL || !base64_decode(payload_b64, &payload, &payload_len)) {
             fail("payload base64 decode failed", -1);
         }
-        packet_cap = naion_csm_client_encrypt_size(payload_len);
+        packet_cap = naion_csm_client_encrypt_size_ex(payload_len, nonce_mode);
         packet = (unsigned char *) malloc(packet_cap);
         if (packet == NULL) {
             fail("packet alloc failed", -1);
@@ -248,8 +253,8 @@ int main(int argc, char **argv) {
         {
             int i;
             for (i = 0; i < repeat; ++i) {
-                if (naion_csm_client_encrypt(&client, payload, payload_len, packet, packet_cap, &packet_len) != NAION_CSM_OK) {
-                    fail("naion_csm_client_encrypt failed", -1);
+                if (naion_csm_client_encrypt_ex(&client, payload, payload_len, packet, packet_cap, &packet_len, nonce_mode) != NAION_CSM_OK) {
+                    fail("naion_csm_client_encrypt_ex failed", -1);
                 }
             }
         }
@@ -271,7 +276,7 @@ int main(int argc, char **argv) {
             fail("packet base64 decode failed", -1);
         }
         sleep_ms(sleep_before_decrypt_ms);
-        plaintext_cap = naion_csm_server_decrypt_max_plaintext_size(packet_len);
+        plaintext_cap = naion_csm_server_decrypt_max_plaintext_size_ex(packet_len, nonce_mode);
         plaintext = (unsigned char *) malloc(plaintext_cap);
         if (plaintext == NULL) {
             fail("plaintext alloc failed", -1);
@@ -280,8 +285,8 @@ int main(int argc, char **argv) {
         {
             int i;
             for (i = 0; i < repeat; ++i) {
-                if (naion_csm_server_decrypt(&server, packet, packet_len, plaintext, plaintext_cap, &plaintext_len) != NAION_CSM_OK) {
-                    fail("naion_csm_server_decrypt failed", -1);
+                if (naion_csm_server_decrypt_ex(&server, packet, packet_len, plaintext, plaintext_cap, &plaintext_len, nonce_mode) != NAION_CSM_OK) {
+                    fail("naion_csm_server_decrypt_ex failed", -1);
                 }
             }
         }
@@ -308,18 +313,18 @@ int main(int argc, char **argv) {
         if (bootstrap_packet_b64 == NULL || !base64_decode(bootstrap_packet_b64, &bootstrap_packet, &bootstrap_packet_len)) {
             fail("bootstrap packet decode failed", -1);
         }
-        bootstrap_plain_cap = naion_csm_server_decrypt_max_plaintext_size(bootstrap_packet_len);
+        bootstrap_plain_cap = naion_csm_server_decrypt_max_plaintext_size_ex(bootstrap_packet_len, nonce_mode);
         bootstrap_plain = (unsigned char *) malloc(bootstrap_plain_cap);
         if (bootstrap_plain == NULL) {
             fail("bootstrap plain alloc failed", -1);
         }
-        if (naion_csm_server_decrypt(&server, bootstrap_packet, bootstrap_packet_len, bootstrap_plain, bootstrap_plain_cap, &bootstrap_plain_len) != NAION_CSM_OK) {
+        if (naion_csm_server_decrypt_ex(&server, bootstrap_packet, bootstrap_packet_len, bootstrap_plain, bootstrap_plain_cap, &bootstrap_plain_len, nonce_mode) != NAION_CSM_OK) {
             fail("bootstrap server decrypt failed", -1);
         }
         if (payload_b64 == NULL || !base64_decode(payload_b64, &payload, &payload_len)) {
             fail("payload decode failed", -1);
         }
-        packet_cap = naion_csm_server_encrypt_size(payload_len);
+        packet_cap = naion_csm_server_encrypt_size_ex(payload_len, nonce_mode);
         packet = (unsigned char *) malloc(packet_cap);
         if (packet == NULL) {
             fail("packet alloc failed", -1);
@@ -328,8 +333,8 @@ int main(int argc, char **argv) {
         {
             int i;
             for (i = 0; i < repeat; ++i) {
-                if (naion_csm_server_encrypt(&server, payload, payload_len, packet, packet_cap, &packet_len) != NAION_CSM_OK) {
-                    fail("naion_csm_server_encrypt failed", -1);
+                if (naion_csm_server_encrypt_ex(&server, payload, payload_len, packet, packet_cap, &packet_len, nonce_mode) != NAION_CSM_OK) {
+                    fail("naion_csm_server_encrypt_ex failed", -1);
                 }
             }
         }
@@ -353,7 +358,7 @@ int main(int argc, char **argv) {
             fail("packet decode failed", -1);
         }
         sleep_ms(sleep_before_decrypt_ms);
-        plaintext_cap = naion_csm_client_decrypt_max_plaintext_size(packet_len);
+        plaintext_cap = naion_csm_client_decrypt_max_plaintext_size_ex(packet_len, nonce_mode);
         plaintext = (unsigned char *) malloc(plaintext_cap);
         if (plaintext == NULL) {
             fail("plaintext alloc failed", -1);
@@ -362,8 +367,8 @@ int main(int argc, char **argv) {
         {
             int i;
             for (i = 0; i < repeat; ++i) {
-                if (naion_csm_client_decrypt(&client, packet, packet_len, plaintext, plaintext_cap, &plaintext_len) != NAION_CSM_OK) {
-                    fail("naion_csm_client_decrypt failed", -1);
+                if (naion_csm_client_decrypt_ex(&client, packet, packet_len, plaintext, plaintext_cap, &plaintext_len, nonce_mode) != NAION_CSM_OK) {
+                    fail("naion_csm_client_decrypt_ex failed", -1);
                 }
             }
         }

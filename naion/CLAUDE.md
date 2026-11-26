@@ -85,7 +85,7 @@ Build matrix (each compiles standalone):
 
 **Key conversion:** `naion_sign_ed25519_pk_to_curve25519` and `naion_sign_ed25519_sk_to_curve25519` convert Ed25519 keys to X25519 keys — critical for protocols that use Ed25519 for identity but X25519 for key exchange (CSM does exactly this).
 
-**Randomness:** Callers may plug in a custom RNG via `naion_set_random_provider()`. The built-in fallback uses `CryptGenRandom` on Windows, `getrandom()` on Linux, and `/dev/urandom` on other POSIX.
+**Randomness:** Callers may plug in a custom RNG via `naion_set_random_provider()`. The built-in fallback uses `CryptGenRandom` on Windows, `getrandom()` on Linux, `arc4random_buf()` on macOS and the BSDs, and `/dev/urandom` on other POSIX.
 
 **Optional libsodium compat:** Defining `NAION_ENABLE_SODIUM_COMPAT_NAMES` before include creates `#define` aliases (`sodium_init` → `naion_init`, etc.). Disabled by default to avoid symbol collisions.
 
@@ -93,15 +93,23 @@ Build matrix (each compiles standalone):
 
 CSM is now part of `naion.h` (Layer 3). See `PROTOCOL.md` for the full specification.
 
-**Packet layout (fixed outer structure):**
+**Packet layout:** the nonce mode decides whether the packet carries a nonce field.
 ```
-signature(64) | session_x25519_public_key(32) | nonce(24) | mac(16) | ciphertext(variable)
+random mode : signature(64) | session_x25519_public_key(32) | nonce(24) | mac(16) | ciphertext   (136 bytes)
+derived mode: signature(64) | session_x25519_public_key(32) | mac(16) | ciphertext                 (112 bytes)
 ```
-Fixed overhead: 136 bytes. Max UDP datagram: 1024 bytes.
+Max UDP datagram: 1024 bytes.
 
 **Directional asymmetry:**
-- Client → Server plaintext: `client_ed25519_public_key(32) || application_payload` (max payload: 856 bytes)
-- Server → Client plaintext: `application_payload` only (max payload: 888 bytes)
+- Client → Server plaintext: `client_ed25519_public_key(32) || application_payload` (max payload: 856 bytes in random mode, 880 bytes in derived mode)
+- Server → Client plaintext: `application_payload` only (max payload: 888 bytes in random mode, 912 bytes in derived mode)
+
+**Nonce mode** (the `nonce_mode` argument, see PROTOCOL.md):
+- `NAION_CSM_NONCE_DERIVED` (0, the default): the nonce is derived from the X25519 shared secret of the packet and it is not transmitted. `nonce = HChaCha20(shared, "naion.csm.nonce.")[0..23]`. The AEAD key stays `HChaCha20(shared, 0^16)`. Every packet uses a fresh one-time X25519 key pair, so the nonce never repeats.
+- `NAION_CSM_NONCE_RANDOM` (1): 24 random bytes, transmitted in the packet (the original behaviour).
+- The sender and the receiver must agree on the mode out of band. A mismatch makes the AEAD verification fail.
+- The `naion_csm_*_ex()` functions take the mode. The functions without `_ex` keep their signature and use the derived mode.
+- CSM-SESSION (`naion_csm_sess_*`) has a fixed session key. It always uses random nonces and has no nonce mode.
 
 The server learns the client's public key from the first successfully decrypted packet — no pre-sharing of client keys.
 
@@ -136,15 +144,16 @@ Internal helpers use `_naion_` / `naion_csm_internal_` prefixes and are `static`
 
 The CSM protocol has implementations in three languages that must remain compatible:
 - `naion.h` (C — this repo)
-- `csm.py` (Python — not present in this directory)
-- `csm.go` (Go — not present in this directory)
+- `python/naion.py` (Python)
+- `go/naion.go` (Go)
 
-All three must maintain identical packet layout, AEAD associated data, detached signature coverage, and UDP size budget. Changes to the protocol must be reflected across all implementations.
+All three must maintain identical packet layout, nonce mode semantics and nonce derivation, AEAD associated data, detached signature coverage, and UDP size budget. All three must reproduce the test vectors in PROTOCOL.md. Changes to the protocol must be reflected across all implementations.
 
 ## Platform Support
 
 - **Windows**: CryptGenRandom for entropy, `<windows.h>` + `<wincrypt.h>`
-- **Linux**: `getrandom()` syscall (via `<sys/syscall.h>`)
+- **Linux**: `getrandom()` from `<sys/random.h>`, then `/dev/urandom` as a fallback
+- **macOS / BSDs**: `arc4random_buf()` (`<stdlib.h>`). The `__has_include(<sys/random.h>)` probe is skipped on Apple, because the macOS 26 SDK ships the header without the `getrandom()` symbol. No platform shim is needed.
 - **Other POSIX**: `/dev/urandom` fallback (`<unistd.h>`, `<fcntl.h>`)
 - Runtime CPU feature detection is not used — all primitives are portable C
 

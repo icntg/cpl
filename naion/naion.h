@@ -523,15 +523,52 @@ enum {
     NAION_CSM_ERR_NO_DATA = -7
 };
 
-#define NAION_CSM_PACKET_OVERHEAD \
-    (naion_sign_ed25519_BYTES + naion_box_PUBLICKEYBYTES_MAX + \
-     naion_box_NONCEBYTES_MAX + naion_box_MACBYTES_MAX)
 #define NAION_CSM_CLIENT_PK_BYTES naion_sign_ed25519_PUBLICKEYBYTES
 #define NAION_CSM_MAX_UDP_DATAGRAM_BYTES 1024U
+
+/*
+ * nonce mode — the nonce_mode argument of the naion_csm_*_ex() functions.
+ *
+ * NAION_CSM_NONCE_DERIVED (compact mode):
+ *   nonce = HChaCha20(shared, "naion.csm.nonce.")[0..23], where shared is the
+ *   X25519 shared secret of this packet. The nonce is not transmitted, so the
+ *   packet has no nonce field. CSM uses a fresh one-time X25519 key pair for
+ *   every packet, so the shared secret and the derived nonce are unique per
+ *   packet.
+ * NAION_CSM_NONCE_RANDOM:
+ *   The nonce is 24 random bytes and it is transmitted in the packet.
+ *
+ * The functions without the _ex suffix use NAION_CSM_NONCE_DERIVED.
+ * Sender and receiver must use the same nonce mode.
+ */
+#define NAION_CSM_NONCE_DERIVED 0
+#define NAION_CSM_NONCE_RANDOM  1
+
+/* Per nonce mode: nonce field length in the packet, fixed overhead, max payload. */
+#define NAION_CSM_NONCE_FIELD_BYTES(mode) \
+    (((mode) != 0) ? (naion_box_NONCEBYTES_MAX) : 0U)
+#define NAION_CSM_PACKET_OVERHEAD_EX(mode) \
+    (naion_sign_ed25519_BYTES + naion_box_PUBLICKEYBYTES_MAX + \
+     NAION_CSM_NONCE_FIELD_BYTES(mode) + naion_box_MACBYTES_MAX)
+#define NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES_EX(mode) \
+    (NAION_CSM_MAX_UDP_DATAGRAM_BYTES - NAION_CSM_PACKET_OVERHEAD_EX(mode) - \
+     NAION_CSM_CLIENT_PK_BYTES)
+#define NAION_CSM_MAX_SERVER_PAYLOAD_BYTES_EX(mode) \
+    (NAION_CSM_MAX_UDP_DATAGRAM_BYTES - NAION_CSM_PACKET_OVERHEAD_EX(mode))
+
+/* Random mode: the packet carries the nonce (136 bytes of fixed overhead). */
+#define NAION_CSM_PACKET_OVERHEAD NAION_CSM_PACKET_OVERHEAD_EX(NAION_CSM_NONCE_RANDOM)
 #define NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES \
-    (NAION_CSM_MAX_UDP_DATAGRAM_BYTES - NAION_CSM_PACKET_OVERHEAD - NAION_CSM_CLIENT_PK_BYTES)
+    NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES_EX(NAION_CSM_NONCE_RANDOM)
 #define NAION_CSM_MAX_SERVER_PAYLOAD_BYTES \
-    (NAION_CSM_MAX_UDP_DATAGRAM_BYTES - NAION_CSM_PACKET_OVERHEAD)
+    NAION_CSM_MAX_SERVER_PAYLOAD_BYTES_EX(NAION_CSM_NONCE_RANDOM)
+/* Derived mode (compact): the packet has no nonce field (112 bytes of overhead). */
+#define NAION_CSM_COMPACT_PACKET_OVERHEAD \
+    NAION_CSM_PACKET_OVERHEAD_EX(NAION_CSM_NONCE_DERIVED)
+#define NAION_CSM_COMPACT_MAX_CLIENT_PAYLOAD_BYTES \
+    NAION_CSM_MAX_CLIENT_PAYLOAD_BYTES_EX(NAION_CSM_NONCE_DERIVED)
+#define NAION_CSM_COMPACT_MAX_SERVER_PAYLOAD_BYTES \
+    NAION_CSM_MAX_SERVER_PAYLOAD_BYTES_EX(NAION_CSM_NONCE_DERIVED)
 
 typedef struct naion_csm_client {
     uint8_t ed_seed[naion_sign_ed25519_SEEDBYTES];
@@ -563,11 +600,18 @@ int naion_csm_server_create(
     const uint8_t ed_seed_server[naion_sign_ed25519_SEEDBYTES]
 );
 
+/* nonce_mode is NAION_CSM_NONCE_DERIVED or NAION_CSM_NONCE_RANDOM. The size
+ * helpers without the _ex suffix report the derived (compact) packet size. */
 size_t naion_csm_client_encrypt_size(size_t plaintext_len);
+size_t naion_csm_client_encrypt_size_ex(size_t plaintext_len, int nonce_mode);
 size_t naion_csm_client_decrypt_max_plaintext_size(size_t packet_len);
+size_t naion_csm_client_decrypt_max_plaintext_size_ex(size_t packet_len, int nonce_mode);
 size_t naion_csm_server_encrypt_size(size_t plaintext_len);
+size_t naion_csm_server_encrypt_size_ex(size_t plaintext_len, int nonce_mode);
 size_t naion_csm_server_decrypt_max_plaintext_size(size_t packet_len);
+size_t naion_csm_server_decrypt_max_plaintext_size_ex(size_t packet_len, int nonce_mode);
 
+/* Sender and receiver must agree on the nonce mode. */
 int naion_csm_client_encrypt(
     const naion_csm_client *client,
     const uint8_t *plaintext,
@@ -575,6 +619,15 @@ int naion_csm_client_encrypt(
     uint8_t *out_packet,
     size_t out_packet_cap,
     size_t *out_packet_len
+);
+int naion_csm_client_encrypt_ex(
+    const naion_csm_client *client,
+    const uint8_t *plaintext,
+    size_t plaintext_len,
+    uint8_t *out_packet,
+    size_t out_packet_cap,
+    size_t *out_packet_len,
+    int nonce_mode
 );
 
 int naion_csm_client_decrypt(
@@ -585,6 +638,15 @@ int naion_csm_client_decrypt(
     size_t out_plaintext_cap,
     size_t *out_plaintext_len
 );
+int naion_csm_client_decrypt_ex(
+    const naion_csm_client *client,
+    const uint8_t *packet,
+    size_t packet_len,
+    uint8_t *out_plaintext,
+    size_t out_plaintext_cap,
+    size_t *out_plaintext_len,
+    int nonce_mode
+);
 
 int naion_csm_server_decrypt(
     naion_csm_server *server,
@@ -594,6 +656,15 @@ int naion_csm_server_decrypt(
     size_t out_plaintext_cap,
     size_t *out_plaintext_len
 );
+int naion_csm_server_decrypt_ex(
+    naion_csm_server *server,
+    const uint8_t *packet,
+    size_t packet_len,
+    uint8_t *out_plaintext,
+    size_t out_plaintext_cap,
+    size_t *out_plaintext_len,
+    int nonce_mode
+);
 
 int naion_csm_server_encrypt(
     const naion_csm_server *server,
@@ -602,6 +673,15 @@ int naion_csm_server_encrypt(
     uint8_t *out_packet,
     size_t out_packet_cap,
     size_t *out_packet_len
+);
+int naion_csm_server_encrypt_ex(
+    const naion_csm_server *server,
+    const uint8_t *plaintext,
+    size_t plaintext_len,
+    uint8_t *out_packet,
+    size_t out_packet_cap,
+    size_t *out_packet_len,
+    int nonce_mode
 );
 
 #endif /* NAION_LAYER_CSM */
@@ -655,22 +735,43 @@ int naion_csm_ca_handshake_verify(naion_csm_ca_client *client,
 
 /* Post-handshake CSM traffic (identical packet format to Layer 3). */
 size_t naion_csm_ca_client_encrypt_size(size_t plaintext_len);
+size_t naion_csm_ca_client_encrypt_size_ex(size_t plaintext_len, int nonce_mode);
 size_t naion_csm_ca_client_decrypt_max_plaintext_size(size_t packet_len);
+size_t naion_csm_ca_client_decrypt_max_plaintext_size_ex(size_t packet_len, int nonce_mode);
 size_t naion_csm_ca_server_encrypt_size(size_t plaintext_len);
+size_t naion_csm_ca_server_encrypt_size_ex(size_t plaintext_len, int nonce_mode);
 size_t naion_csm_ca_server_decrypt_max_plaintext_size(size_t packet_len);
+size_t naion_csm_ca_server_decrypt_max_plaintext_size_ex(size_t packet_len, int nonce_mode);
 
+/* nonce_mode has the same meaning as in naion_csm_client_encrypt_ex(). */
 int naion_csm_ca_client_encrypt(naion_csm_ca_client *client,
                                  const uint8_t *plaintext, size_t plaintext_len,
                                  uint8_t *out, size_t out_cap, size_t *out_len);
+int naion_csm_ca_client_encrypt_ex(naion_csm_ca_client *client,
+                                 const uint8_t *plaintext, size_t plaintext_len,
+                                 uint8_t *out, size_t out_cap, size_t *out_len,
+                                 int nonce_mode);
 int naion_csm_ca_client_decrypt(const naion_csm_ca_client *client,
                                  const uint8_t *packet, size_t packet_len,
                                  uint8_t *out, size_t out_cap, size_t *out_len);
+int naion_csm_ca_client_decrypt_ex(const naion_csm_ca_client *client,
+                                 const uint8_t *packet, size_t packet_len,
+                                 uint8_t *out, size_t out_cap, size_t *out_len,
+                                 int nonce_mode);
 int naion_csm_ca_server_encrypt(const naion_csm_ca_server *server,
                                  const uint8_t *plaintext, size_t plaintext_len,
                                  uint8_t *out, size_t out_cap, size_t *out_len);
+int naion_csm_ca_server_encrypt_ex(const naion_csm_ca_server *server,
+                                 const uint8_t *plaintext, size_t plaintext_len,
+                                 uint8_t *out, size_t out_cap, size_t *out_len,
+                                 int nonce_mode);
 int naion_csm_ca_server_decrypt(naion_csm_ca_server *server,
                                  const uint8_t *packet, size_t packet_len,
                                  uint8_t *out, size_t out_cap, size_t *out_len);
+int naion_csm_ca_server_decrypt_ex(naion_csm_ca_server *server,
+                                 const uint8_t *packet, size_t packet_len,
+                                 uint8_t *out, size_t out_cap, size_t *out_len,
+                                 int nonce_mode);
 void naion_csm_ca_client_wipe(naion_csm_ca_client *client);
 void naion_csm_ca_server_wipe(naion_csm_ca_server *server);
 
@@ -846,7 +947,10 @@ int naion_csm_sess_server_decrypt(
 #if defined(__linux__)
 #include <sys/syscall.h>
 #endif
-#if defined(__has_include)
+/* The macOS 26 SDK ships <sys/random.h> without the getrandom() symbol, so the
+ * __has_include probe reports a false positive there. Apple and the BSDs use
+ * arc4random_buf (naion_try_arc4random) instead. */
+#if defined(__has_include) && !defined(__APPLE__)
 #if __has_include(<sys/random.h>)
 #include <sys/random.h>
 #define NAION_HAVE_GETRANDOM 1
@@ -4971,15 +5075,54 @@ static int naion_csm_internal_randombytes(uint8_t *buf, size_t size) {
     return NAION_CSM_OK;
 }
 
+/* Length of the nonce field inside the packet: 24 bytes in random mode, none
+ * in derived (compact) mode. */
+static size_t naion_csm_internal_nonce_field_bytes(int nonce_mode) {
+    return (nonce_mode != 0) ? (size_t) NAION_CSM__NONCE_BYTES : 0U;
+}
+
+/*
+ * One X25519 shared secret feeds two independent outputs:
+ *   ekey  = HChaCha20(shared, 0^16)                          (same as beforenm)
+ *   nonce = HChaCha20(shared, "naion.csm.nonce.")[0..23]
+ * The two HChaCha20 calls take different inputs, so the nonce reveals nothing
+ * about ekey. CSM generates a fresh one-time X25519 key pair for every packet,
+ * so shared, ekey and nonce are unique for each packet.
+ */
+static int naion_csm_internal_derive(
+    const uint8_t peer_xpk[NAION_CSM__X_PK_BYTES],
+    const uint8_t self_xsk[NAION_CSM__X_SK_BYTES],
+    uint8_t ekey[NAION_CSM__AEAD_KEY_BYTES],
+    uint8_t nonce[NAION_CSM__NONCE_BYTES]
+) {
+    static const uint8_t zero16[16] = { 0 };
+    static const uint8_t kdf_in[16] = {
+        'n', 'a', 'i', 'o', 'n', '.', 'c', 's', 'm', '.', 'n', 'o', 'n', 'c', 'e', '.'
+    };
+    uint8_t shared[32];
+    uint8_t derived[32];
+    if (naion_scalarmult_curve25519(shared, self_xsk, peer_xpk) != 0) {
+        return NAION_CSM_ERR_CRYPTO;
+    }
+    hchacha20(ekey, zero16, shared);
+    hchacha20(derived, kdf_in, shared);
+    memmove(nonce, derived, NAION_CSM__NONCE_BYTES);
+    naion_memzero(shared, sizeof(shared));
+    naion_memzero(derived, sizeof(derived));
+    return NAION_CSM_OK;
+}
+
 static int naion_csm_internal_seal(
     const uint8_t *plaintext,
     size_t plaintext_len,
     const uint8_t peer_xpk[NAION_CSM__X_PK_BYTES],
     const uint8_t self_xsk[NAION_CSM__X_SK_BYTES],
     const uint8_t aad[NAION_CSM__X_PK_BYTES],
-    uint8_t *out_nonce_cipher
+    uint8_t *out_nonce_cipher,
+    int nonce_mode
 ) {
     int ret;
+    size_t nonce_field = naion_csm_internal_nonce_field_bytes(nonce_mode);
     uint8_t nonce[NAION_CSM__NONCE_BYTES];
     uint8_t ekey[NAION_CSM__AEAD_KEY_BYTES];
     unsigned long long mac_len = 0ULL;
@@ -4989,20 +5132,23 @@ static int naion_csm_internal_seal(
     if (plaintext_len > 0U && plaintext == NULL) {
         return NAION_CSM_ERR_INVALID_ARGUMENT;
     }
-    ret = naion_csm_internal_randombytes(nonce, sizeof(nonce));
+    ret = naion_csm_internal_derive(peer_xpk, self_xsk, ekey, nonce);
     if (ret != NAION_CSM_OK) {
         return ret;
     }
-    ret = naion_box_curve25519xchacha20poly1305_beforenm(ekey, peer_xpk, self_xsk);
-    if (ret != 0) {
-        naion_memzero(nonce, sizeof(nonce));
-        naion_memzero(ekey, sizeof(ekey));
-        return NAION_CSM_ERR_CRYPTO;
+    if (nonce_field != 0U) {
+        /* Random mode: replace the derived nonce and store it in the packet. */
+        ret = naion_csm_internal_randombytes(nonce, sizeof(nonce));
+        if (ret != NAION_CSM_OK) {
+            naion_memzero(nonce, sizeof(nonce));
+            naion_memzero(ekey, sizeof(ekey));
+            return ret;
+        }
+        memmove(out_nonce_cipher, nonce, sizeof(nonce));
     }
-    memmove(out_nonce_cipher, nonce, sizeof(nonce));
     ret = naion_aead_xchacha20poly1305_ietf_encrypt_detached(
-        out_nonce_cipher + NAION_CSM__NONCE_BYTES + NAION_CSM__MAC_BYTES,
-        out_nonce_cipher + NAION_CSM__NONCE_BYTES,
+        out_nonce_cipher + nonce_field + NAION_CSM__MAC_BYTES,
+        out_nonce_cipher + nonce_field,
         &mac_len,
         plaintext,
         (unsigned long long) plaintext_len,
@@ -5029,30 +5175,33 @@ static int naion_csm_internal_open(
     const uint8_t self_xsk[NAION_CSM__X_SK_BYTES],
     const uint8_t aad[NAION_CSM__X_PK_BYTES],
     uint8_t *out_plaintext,
-    size_t *out_plaintext_len
+    size_t *out_plaintext_len,
+    int nonce_mode
 ) {
+    size_t nonce_field = naion_csm_internal_nonce_field_bytes(nonce_mode);
     size_t plaintext_len;
     int ret;
     const uint8_t *nonce;
     const uint8_t *mac;
     const uint8_t *ciphertext;
+    uint8_t derived_nonce[NAION_CSM__NONCE_BYTES];
     uint8_t ekey[NAION_CSM__AEAD_KEY_BYTES];
     if (nonce_cipher == NULL || peer_xpk == NULL || self_xsk == NULL || aad == NULL ||
         out_plaintext == NULL || out_plaintext_len == NULL) {
         return NAION_CSM_ERR_INVALID_ARGUMENT;
     }
-    if (nonce_cipher_len <= (size_t) (NAION_CSM__NONCE_BYTES + NAION_CSM__MAC_BYTES)) {
+    if (nonce_cipher_len <= nonce_field + (size_t) NAION_CSM__MAC_BYTES) {
         return NAION_CSM_ERR_INVALID_ARGUMENT;
     }
-    plaintext_len = nonce_cipher_len - (size_t) NAION_CSM__NONCE_BYTES - (size_t) NAION_CSM__MAC_BYTES;
-    nonce = nonce_cipher;
-    mac = nonce_cipher + NAION_CSM__NONCE_BYTES;
-    ciphertext = nonce_cipher + NAION_CSM__NONCE_BYTES + NAION_CSM__MAC_BYTES;
-    ret = naion_box_curve25519xchacha20poly1305_beforenm(ekey, peer_xpk, self_xsk);
-    if (ret != 0) {
-        naion_memzero(ekey, sizeof(ekey));
-        return NAION_CSM_ERR_CRYPTO;
+    plaintext_len = nonce_cipher_len - nonce_field - (size_t) NAION_CSM__MAC_BYTES;
+    ret = naion_csm_internal_derive(peer_xpk, self_xsk, ekey, derived_nonce);
+    if (ret != NAION_CSM_OK) {
+        return ret;
     }
+    /* Random mode: the nonce travels in the packet. Derived mode: use the KDF output. */
+    nonce = (nonce_field != 0U) ? nonce_cipher : derived_nonce;
+    mac = nonce_cipher + nonce_field;
+    ciphertext = nonce_cipher + nonce_field + NAION_CSM__MAC_BYTES;
     ret = naion_aead_xchacha20poly1305_ietf_decrypt_detached(
         out_plaintext,
         NULL,
@@ -5064,6 +5213,7 @@ static int naion_csm_internal_open(
         nonce,
         ekey
     );
+    naion_memzero(derived_nonce, sizeof(derived_nonce));
     naion_memzero(ekey, sizeof(ekey));
     if (ret != 0) {
         return NAION_CSM_ERR_CRYPTO;
@@ -5173,53 +5323,57 @@ int naion_csm_server_create(
     return NAION_CSM_OK;
 }
 
-size_t naion_csm_client_encrypt_size(size_t plaintext_len) {
-    return (size_t) NAION_CSM__SIGN_BYTES +
-           (size_t) NAION_CSM__X_PK_BYTES +
-           (size_t) NAION_CSM__NONCE_BYTES +
-           (size_t) NAION_CSM__MAC_BYTES +
+size_t naion_csm_client_encrypt_size_ex(size_t plaintext_len, int nonce_mode) {
+    return (size_t) NAION_CSM_PACKET_OVERHEAD_EX(nonce_mode) +
            (size_t) NAION_CSM__ED_PK_BYTES +
            plaintext_len;
 }
 
-size_t naion_csm_client_decrypt_max_plaintext_size(size_t packet_len) {
-    size_t fixed = (size_t) NAION_CSM__SIGN_BYTES +
-                   (size_t) NAION_CSM__X_PK_BYTES +
-                   (size_t) NAION_CSM__NONCE_BYTES +
-                   (size_t) NAION_CSM__MAC_BYTES;
+size_t naion_csm_client_encrypt_size(size_t plaintext_len) {
+    return naion_csm_client_encrypt_size_ex(plaintext_len, NAION_CSM_NONCE_DERIVED);
+}
+
+size_t naion_csm_client_decrypt_max_plaintext_size_ex(size_t packet_len, int nonce_mode) {
+    const size_t fixed = (size_t) NAION_CSM_PACKET_OVERHEAD_EX(nonce_mode);
     if (packet_len <= fixed) {
         return 0U;
     }
     return packet_len - fixed;
+}
+
+size_t naion_csm_client_decrypt_max_plaintext_size(size_t packet_len) {
+    return naion_csm_client_decrypt_max_plaintext_size_ex(packet_len, NAION_CSM_NONCE_DERIVED);
+}
+
+size_t naion_csm_server_encrypt_size_ex(size_t plaintext_len, int nonce_mode) {
+    return (size_t) NAION_CSM_PACKET_OVERHEAD_EX(nonce_mode) + plaintext_len;
 }
 
 size_t naion_csm_server_encrypt_size(size_t plaintext_len) {
-    return (size_t) NAION_CSM__SIGN_BYTES +
-           (size_t) NAION_CSM__X_PK_BYTES +
-           (size_t) NAION_CSM__NONCE_BYTES +
-           (size_t) NAION_CSM__MAC_BYTES +
-           plaintext_len;
+    return naion_csm_server_encrypt_size_ex(plaintext_len, NAION_CSM_NONCE_DERIVED);
 }
 
-size_t naion_csm_server_decrypt_max_plaintext_size(size_t packet_len) {
-    size_t fixed = (size_t) NAION_CSM__SIGN_BYTES +
-                   (size_t) NAION_CSM__X_PK_BYTES +
-                   (size_t) NAION_CSM__NONCE_BYTES +
-                   (size_t) NAION_CSM__MAC_BYTES +
-                   (size_t) NAION_CSM__ED_PK_BYTES;
+size_t naion_csm_server_decrypt_max_plaintext_size_ex(size_t packet_len, int nonce_mode) {
+    const size_t fixed = (size_t) NAION_CSM_PACKET_OVERHEAD_EX(nonce_mode) +
+                         (size_t) NAION_CSM__ED_PK_BYTES;
     if (packet_len <= fixed) {
         return 0U;
     }
     return packet_len - fixed;
 }
 
-int naion_csm_client_encrypt(
+size_t naion_csm_server_decrypt_max_plaintext_size(size_t packet_len) {
+    return naion_csm_server_decrypt_max_plaintext_size_ex(packet_len, NAION_CSM_NONCE_DERIVED);
+}
+
+int naion_csm_client_encrypt_ex(
     const naion_csm_client *client,
     const uint8_t *plaintext,
     size_t plaintext_len,
     uint8_t *out_packet,
     size_t out_packet_cap,
-    size_t *out_packet_len
+    size_t *out_packet_len,
+    int nonce_mode
 ) {
     uint8_t server_xpk[NAION_CSM__X_PK_BYTES];
     uint8_t session_xsk[NAION_CSM__X_SK_BYTES];
@@ -5228,7 +5382,7 @@ int naion_csm_client_encrypt(
     uint8_t *body;
     uint8_t *body_payload;
     size_t body_payload_len;
-    size_t plain_payload_len;
+    size_t plain_payload_len = 0U;
     uint8_t *plain_payload = NULL;
     int ret = NAION_CSM_ERR_CRYPTO;
 
@@ -5244,7 +5398,7 @@ int naion_csm_client_encrypt(
     if (plaintext_len == 0U) {
         return NAION_CSM_ERR_NO_DATA;
     }
-    if (out_packet_cap < naion_csm_client_encrypt_size(plaintext_len)) {
+    if (out_packet_cap < naion_csm_client_encrypt_size_ex(plaintext_len, nonce_mode)) {
         return NAION_CSM_ERR_BUFFER_TOO_SMALL;
     }
 
@@ -5259,7 +5413,7 @@ int naion_csm_client_encrypt(
     body = out_packet + NAION_CSM__SIGN_BYTES;
     memmove(body, session_xpk, NAION_CSM__X_PK_BYTES);
     body_payload = body + NAION_CSM__X_PK_BYTES;
-    body_payload_len = (size_t) NAION_CSM__NONCE_BYTES + (size_t) NAION_CSM__MAC_BYTES + (size_t) NAION_CSM__ED_PK_BYTES + plaintext_len;
+    body_payload_len = naion_csm_internal_nonce_field_bytes(nonce_mode) + (size_t) NAION_CSM__MAC_BYTES + (size_t) NAION_CSM__ED_PK_BYTES + plaintext_len;
     plain_payload_len = (size_t) NAION_CSM__ED_PK_BYTES + plaintext_len;
     plain_payload = (uint8_t *) malloc(plain_payload_len);
     if (plain_payload == NULL) {
@@ -5273,14 +5427,15 @@ int naion_csm_client_encrypt(
             server_xpk,
             session_xsk,
             session_xpk,
-            body_payload) != NAION_CSM_OK) {
+            body_payload,
+            nonce_mode) != NAION_CSM_OK) {
         goto __ERROR__;
     }
     if (naion_csm_internal_sign(body, (size_t) NAION_CSM__X_PK_BYTES + body_payload_len,
                                 client->ed_secret_key, sig) != NAION_CSM_OK) {
         goto __ERROR__;
     }
-    *out_packet_len = naion_csm_client_encrypt_size(plaintext_len);
+    *out_packet_len = naion_csm_client_encrypt_size_ex(plaintext_len, nonce_mode);
     ret = NAION_CSM_OK;
     goto __FREE__;
 
@@ -5298,17 +5453,19 @@ __FREE__:
     return ret;
 }
 
-int naion_csm_client_decrypt(
+int naion_csm_client_decrypt_ex(
     const naion_csm_client *client,
     const uint8_t *packet,
     size_t packet_len,
     uint8_t *out_plaintext,
     size_t out_plaintext_cap,
-    size_t *out_plaintext_len
+    size_t *out_plaintext_len,
+    int nonce_mode
 ) {
+    const size_t nonce_field = naion_csm_internal_nonce_field_bytes(nonce_mode);
     size_t min_size = (size_t) NAION_CSM__SIGN_BYTES +
                       (size_t) NAION_CSM__X_PK_BYTES +
-                      (size_t) NAION_CSM__NONCE_BYTES +
+                      nonce_field +
                       (size_t) NAION_CSM__MAC_BYTES;
     const uint8_t *sig;
     const uint8_t *body;
@@ -5318,7 +5475,7 @@ int naion_csm_client_decrypt(
     uint8_t client_xsk[NAION_CSM__X_SK_BYTES];
     uint8_t *opened_buf = NULL;
     size_t opened_cap = 0U;
-    size_t plaintext_len = 0;
+    size_t plaintext_len = 0U;
     int ret = NAION_CSM_ERR_CRYPTO;
 
     if (out_plaintext_len != NULL) {
@@ -5330,7 +5487,7 @@ int naion_csm_client_decrypt(
     if (packet_len <= min_size) {
         return NAION_CSM_ERR_INVALID_ARGUMENT;
     }
-    if (out_plaintext_cap < naion_csm_client_decrypt_max_plaintext_size(packet_len)) {
+    if (out_plaintext_cap < naion_csm_client_decrypt_max_plaintext_size_ex(packet_len, nonce_mode)) {
         return NAION_CSM_ERR_BUFFER_TOO_SMALL;
     }
     sig = packet;
@@ -5348,7 +5505,7 @@ int naion_csm_client_decrypt(
     opened_cap = packet_len -
                  (size_t) NAION_CSM__SIGN_BYTES -
                  (size_t) NAION_CSM__X_PK_BYTES -
-                 (size_t) NAION_CSM__NONCE_BYTES -
+                 nonce_field -
                  (size_t) NAION_CSM__MAC_BYTES;
     opened_buf = (uint8_t *) malloc(opened_cap);
     if (opened_buf == NULL) {
@@ -5361,7 +5518,8 @@ int naion_csm_client_decrypt(
             client_xsk,
             session_xpk,
             opened_buf,
-            &plaintext_len) != NAION_CSM_OK) {
+            &plaintext_len,
+            nonce_mode) != NAION_CSM_OK) {
         goto __ERROR__;
     }
     memmove(out_plaintext, opened_buf, plaintext_len);
@@ -5381,17 +5539,19 @@ __FREE__:
     return ret;
 }
 
-int naion_csm_server_decrypt(
+int naion_csm_server_decrypt_ex(
     naion_csm_server *server,
     const uint8_t *packet,
     size_t packet_len,
     uint8_t *out_plaintext,
     size_t out_plaintext_cap,
-    size_t *out_plaintext_len
+    size_t *out_plaintext_len,
+    int nonce_mode
 ) {
+    const size_t nonce_field = naion_csm_internal_nonce_field_bytes(nonce_mode);
     size_t min_size = (size_t) NAION_CSM__SIGN_BYTES +
                       (size_t) NAION_CSM__X_PK_BYTES +
-                      (size_t) NAION_CSM__NONCE_BYTES +
+                      nonce_field +
                       (size_t) NAION_CSM__MAC_BYTES +
                       (size_t) NAION_CSM__ED_PK_BYTES;
     const uint8_t *sig;
@@ -5403,7 +5563,7 @@ int naion_csm_server_decrypt(
     uint8_t client_ed_public_key[NAION_CSM__ED_PK_BYTES];
     uint8_t *opened_buf = NULL;
     size_t opened_cap = 0U;
-    size_t opened_len = 0;
+    size_t opened_len = 0U;
     int ret = NAION_CSM_ERR_CRYPTO;
 
     if (out_plaintext_len != NULL) {
@@ -5415,7 +5575,7 @@ int naion_csm_server_decrypt(
     if (packet_len <= min_size) {
         return NAION_CSM_ERR_INVALID_ARGUMENT;
     }
-    if (out_plaintext_cap < naion_csm_server_decrypt_max_plaintext_size(packet_len)) {
+    if (out_plaintext_cap < naion_csm_server_decrypt_max_plaintext_size_ex(packet_len, nonce_mode)) {
         return NAION_CSM_ERR_BUFFER_TOO_SMALL;
     }
     if (naion_sign_ed25519_sk_to_curve25519(server_xsk, server->ed_secret_key) != 0) {
@@ -5426,7 +5586,7 @@ int naion_csm_server_decrypt(
     session_xpk = body;
     nonce_cipher = body + NAION_CSM__X_PK_BYTES;
     nonce_cipher_len = packet_len - (size_t) NAION_CSM__SIGN_BYTES - (size_t) NAION_CSM__X_PK_BYTES;
-    opened_cap = nonce_cipher_len - (size_t) NAION_CSM__NONCE_BYTES - (size_t) NAION_CSM__MAC_BYTES;
+    opened_cap = nonce_cipher_len - nonce_field - (size_t) NAION_CSM__MAC_BYTES;
     opened_buf = (uint8_t *) malloc(opened_cap);
     if (opened_buf == NULL) {
         goto __ERROR__;
@@ -5439,7 +5599,8 @@ int naion_csm_server_decrypt(
             server_xsk,
             session_xpk,
             opened_buf,
-            &opened_len) != NAION_CSM_OK) {
+            &opened_len,
+            nonce_mode) != NAION_CSM_OK) {
         goto __ERROR__;
     }
     if (opened_len <= (size_t) NAION_CSM__ED_PK_BYTES) {
@@ -5475,13 +5636,14 @@ __FREE__:
     return ret;
 }
 
-int naion_csm_server_encrypt(
+int naion_csm_server_encrypt_ex(
     const naion_csm_server *server,
     const uint8_t *plaintext,
     size_t plaintext_len,
     uint8_t *out_packet,
     size_t out_packet_cap,
-    size_t *out_packet_len
+    size_t *out_packet_len,
+    int nonce_mode
 ) {
     uint8_t client_xpk[NAION_CSM__X_PK_BYTES];
     uint8_t session_xsk[NAION_CSM__X_SK_BYTES];
@@ -5507,7 +5669,7 @@ int naion_csm_server_encrypt(
     if (!server->client_public_key_initialized) {
         return NAION_CSM_ERR_STATE;
     }
-    if (out_packet_cap < naion_csm_server_encrypt_size(plaintext_len)) {
+    if (out_packet_cap < naion_csm_server_encrypt_size_ex(plaintext_len, nonce_mode)) {
         return NAION_CSM_ERR_BUFFER_TOO_SMALL;
     }
     if (naion_sign_ed25519_pk_to_curve25519(client_xpk, server->client_ed_public_key) != 0) {
@@ -5521,21 +5683,22 @@ int naion_csm_server_encrypt(
     body = out_packet + NAION_CSM__SIGN_BYTES;
     memmove(body, session_xpk, NAION_CSM__X_PK_BYTES);
     body_payload = body + NAION_CSM__X_PK_BYTES;
-    body_payload_len = (size_t) NAION_CSM__NONCE_BYTES + (size_t) NAION_CSM__MAC_BYTES + plaintext_len;
+    body_payload_len = naion_csm_internal_nonce_field_bytes(nonce_mode) + (size_t) NAION_CSM__MAC_BYTES + plaintext_len;
     if (naion_csm_internal_seal(
             plaintext,
             plaintext_len,
             client_xpk,
             session_xsk,
             session_xpk,
-            body_payload) != NAION_CSM_OK) {
+            body_payload,
+            nonce_mode) != NAION_CSM_OK) {
         goto __ERROR__;
     }
     if (naion_csm_internal_sign(body, (size_t) NAION_CSM__X_PK_BYTES + body_payload_len,
                                 server->ed_secret_key, sig) != NAION_CSM_OK) {
         goto __ERROR__;
     }
-    *out_packet_len = naion_csm_server_encrypt_size(plaintext_len);
+    *out_packet_len = naion_csm_server_encrypt_size_ex(plaintext_len, nonce_mode);
     ret = NAION_CSM_OK;
     goto __FREE__;
 
@@ -5545,6 +5708,59 @@ __ERROR__:
     naion_memzero(session_xpk, sizeof(session_xpk));
 __FREE__:
     return ret;
+}
+
+/* Defaults: derived nonce, compact packet (no nonce field). */
+int naion_csm_client_encrypt(
+    const naion_csm_client *client,
+    const uint8_t *plaintext,
+    size_t plaintext_len,
+    uint8_t *out_packet,
+    size_t out_packet_cap,
+    size_t *out_packet_len
+) {
+    return naion_csm_client_encrypt_ex(client, plaintext, plaintext_len, out_packet,
+                                       out_packet_cap, out_packet_len,
+                                       NAION_CSM_NONCE_DERIVED);
+}
+
+int naion_csm_client_decrypt(
+    const naion_csm_client *client,
+    const uint8_t *packet,
+    size_t packet_len,
+    uint8_t *out_plaintext,
+    size_t out_plaintext_cap,
+    size_t *out_plaintext_len
+) {
+    return naion_csm_client_decrypt_ex(client, packet, packet_len, out_plaintext,
+                                       out_plaintext_cap, out_plaintext_len,
+                                       NAION_CSM_NONCE_DERIVED);
+}
+
+int naion_csm_server_decrypt(
+    naion_csm_server *server,
+    const uint8_t *packet,
+    size_t packet_len,
+    uint8_t *out_plaintext,
+    size_t out_plaintext_cap,
+    size_t *out_plaintext_len
+) {
+    return naion_csm_server_decrypt_ex(server, packet, packet_len, out_plaintext,
+                                       out_plaintext_cap, out_plaintext_len,
+                                       NAION_CSM_NONCE_DERIVED);
+}
+
+int naion_csm_server_encrypt(
+    const naion_csm_server *server,
+    const uint8_t *plaintext,
+    size_t plaintext_len,
+    uint8_t *out_packet,
+    size_t out_packet_cap,
+    size_t *out_packet_len
+) {
+    return naion_csm_server_encrypt_ex(server, plaintext, plaintext_len, out_packet,
+                                       out_packet_cap, out_packet_len,
+                                       NAION_CSM_NONCE_DERIVED);
 }
 
 #endif /* NAION_LAYER_CSM */
@@ -5629,25 +5845,42 @@ int naion_csm_ca_handshake_verify(naion_csm_ca_client *client,
     return NAION_CSM_OK;
 }
 
+size_t naion_csm_ca_client_encrypt_size_ex(size_t plaintext_len, int nonce_mode) {
+    return naion_csm_client_encrypt_size_ex(plaintext_len, nonce_mode);
+}
+
 size_t naion_csm_ca_client_encrypt_size(size_t plaintext_len) {
-    return naion_csm_client_encrypt_size(plaintext_len);
+    return naion_csm_client_encrypt_size_ex(plaintext_len, NAION_CSM_NONCE_DERIVED);
+}
+
+size_t naion_csm_ca_client_decrypt_max_plaintext_size_ex(size_t packet_len, int nonce_mode) {
+    return naion_csm_client_decrypt_max_plaintext_size_ex(packet_len, nonce_mode);
 }
 
 size_t naion_csm_ca_client_decrypt_max_plaintext_size(size_t packet_len) {
-    return naion_csm_client_decrypt_max_plaintext_size(packet_len);
+    return naion_csm_client_decrypt_max_plaintext_size_ex(packet_len, NAION_CSM_NONCE_DERIVED);
+}
+
+size_t naion_csm_ca_server_encrypt_size_ex(size_t plaintext_len, int nonce_mode) {
+    return naion_csm_server_encrypt_size_ex(plaintext_len, nonce_mode);
 }
 
 size_t naion_csm_ca_server_encrypt_size(size_t plaintext_len) {
-    return naion_csm_server_encrypt_size(plaintext_len);
+    return naion_csm_server_encrypt_size_ex(plaintext_len, NAION_CSM_NONCE_DERIVED);
+}
+
+size_t naion_csm_ca_server_decrypt_max_plaintext_size_ex(size_t packet_len, int nonce_mode) {
+    return naion_csm_server_decrypt_max_plaintext_size_ex(packet_len, nonce_mode);
 }
 
 size_t naion_csm_ca_server_decrypt_max_plaintext_size(size_t packet_len) {
-    return naion_csm_server_decrypt_max_plaintext_size(packet_len);
+    return naion_csm_server_decrypt_max_plaintext_size_ex(packet_len, NAION_CSM_NONCE_DERIVED);
 }
 
-int naion_csm_ca_client_encrypt(naion_csm_ca_client *client,
+int naion_csm_ca_client_encrypt_ex(naion_csm_ca_client *client,
                                  const uint8_t *plaintext, size_t plaintext_len,
-                                 uint8_t *out, size_t out_cap, size_t *out_len) {
+                                 uint8_t *out, size_t out_cap, size_t *out_len,
+                                 int nonce_mode) {
     naion_csm_client view;
     int ret;
     if (client == NULL) {
@@ -5664,14 +5897,23 @@ int naion_csm_ca_client_encrypt(naion_csm_ca_client *client,
     memmove(view.ed_secret_key, client->ed_secret_key, naion_sign_ed25519_SECRETKEYBYTES);
     memmove(view.ed_public_key, client->ed_public_key, naion_sign_ed25519_PUBLICKEYBYTES);
     memmove(view.server_ed_public_key, client->server_ed_public_key, naion_sign_ed25519_PUBLICKEYBYTES);
-    ret = naion_csm_client_encrypt(&view, plaintext, plaintext_len, out, out_cap, out_len);
+    ret = naion_csm_client_encrypt_ex(&view, plaintext, plaintext_len, out, out_cap, out_len,
+                                      nonce_mode);
     naion_memzero(&view, sizeof(view));
     return ret;
 }
 
-int naion_csm_ca_client_decrypt(const naion_csm_ca_client *client,
-                                 const uint8_t *packet, size_t packet_len,
+int naion_csm_ca_client_encrypt(naion_csm_ca_client *client,
+                                 const uint8_t *plaintext, size_t plaintext_len,
                                  uint8_t *out, size_t out_cap, size_t *out_len) {
+    return naion_csm_ca_client_encrypt_ex(client, plaintext, plaintext_len, out, out_cap,
+                                           out_len, NAION_CSM_NONCE_DERIVED);
+}
+
+int naion_csm_ca_client_decrypt_ex(const naion_csm_ca_client *client,
+                                 const uint8_t *packet, size_t packet_len,
+                                 uint8_t *out, size_t out_cap, size_t *out_len,
+                                 int nonce_mode) {
     naion_csm_client view;
     int ret;
     if (client == NULL) {
@@ -5687,14 +5929,23 @@ int naion_csm_ca_client_decrypt(const naion_csm_ca_client *client,
     memmove(view.ed_secret_key, client->ed_secret_key, naion_sign_ed25519_SECRETKEYBYTES);
     memmove(view.ed_public_key, client->ed_public_key, naion_sign_ed25519_PUBLICKEYBYTES);
     memmove(view.server_ed_public_key, client->server_ed_public_key, naion_sign_ed25519_PUBLICKEYBYTES);
-    ret = naion_csm_client_decrypt(&view, packet, packet_len, out, out_cap, out_len);
+    ret = naion_csm_client_decrypt_ex(&view, packet, packet_len, out, out_cap, out_len,
+                                      nonce_mode);
     naion_memzero(&view, sizeof(view));
     return ret;
 }
 
-int naion_csm_ca_server_encrypt(const naion_csm_ca_server *server,
-                                 const uint8_t *plaintext, size_t plaintext_len,
+int naion_csm_ca_client_decrypt(const naion_csm_ca_client *client,
+                                 const uint8_t *packet, size_t packet_len,
                                  uint8_t *out, size_t out_cap, size_t *out_len) {
+    return naion_csm_ca_client_decrypt_ex(client, packet, packet_len, out, out_cap, out_len,
+                                           NAION_CSM_NONCE_DERIVED);
+}
+
+int naion_csm_ca_server_encrypt_ex(const naion_csm_ca_server *server,
+                                 const uint8_t *plaintext, size_t plaintext_len,
+                                 uint8_t *out, size_t out_cap, size_t *out_len,
+                                 int nonce_mode) {
     naion_csm_server view;
     int ret;
     if (server == NULL) {
@@ -5711,14 +5962,23 @@ int naion_csm_ca_server_encrypt(const naion_csm_ca_server *server,
     memmove(view.ed_public_key, server->ed_public_key, naion_sign_ed25519_PUBLICKEYBYTES);
     memmove(view.client_ed_public_key, server->client_ed_public_key, naion_sign_ed25519_PUBLICKEYBYTES);
     view.client_public_key_initialized = server->client_key_verified;
-    ret = naion_csm_server_encrypt(&view, plaintext, plaintext_len, out, out_cap, out_len);
+    ret = naion_csm_server_encrypt_ex(&view, plaintext, plaintext_len, out, out_cap, out_len,
+                                      nonce_mode);
     naion_memzero(&view, sizeof(view));
     return ret;
 }
 
-int naion_csm_ca_server_decrypt(naion_csm_ca_server *server,
-                                 const uint8_t *packet, size_t packet_len,
+int naion_csm_ca_server_encrypt(const naion_csm_ca_server *server,
+                                 const uint8_t *plaintext, size_t plaintext_len,
                                  uint8_t *out, size_t out_cap, size_t *out_len) {
+    return naion_csm_ca_server_encrypt_ex(server, plaintext, plaintext_len, out, out_cap,
+                                           out_len, NAION_CSM_NONCE_DERIVED);
+}
+
+int naion_csm_ca_server_decrypt_ex(naion_csm_ca_server *server,
+                                 const uint8_t *packet, size_t packet_len,
+                                 uint8_t *out, size_t out_cap, size_t *out_len,
+                                 int nonce_mode) {
     naion_csm_server view;
     int ret;
     if (server == NULL) {
@@ -5729,12 +5989,20 @@ int naion_csm_ca_server_decrypt(naion_csm_ca_server *server,
     memmove(view.ed_public_key, server->ed_public_key, naion_sign_ed25519_PUBLICKEYBYTES);
     memmove(view.client_ed_public_key, server->client_ed_public_key, naion_sign_ed25519_PUBLICKEYBYTES);
     view.client_public_key_initialized = server->client_key_verified;
-    ret = naion_csm_server_decrypt(&view, packet, packet_len, out, out_cap, out_len);
+    ret = naion_csm_server_decrypt_ex(&view, packet, packet_len, out, out_cap, out_len,
+                                      nonce_mode);
     /* Reflect any client key learnt from the first packet back to the CA server. */
     memmove(server->client_ed_public_key, view.client_ed_public_key, naion_sign_ed25519_PUBLICKEYBYTES);
     server->client_key_verified = view.client_public_key_initialized;
     naion_memzero(&view, sizeof(view));
     return ret;
+}
+
+int naion_csm_ca_server_decrypt(naion_csm_ca_server *server,
+                                 const uint8_t *packet, size_t packet_len,
+                                 uint8_t *out, size_t out_cap, size_t *out_len) {
+    return naion_csm_ca_server_decrypt_ex(server, packet, packet_len, out, out_cap, out_len,
+                                           NAION_CSM_NONCE_DERIVED);
 }
 
 void naion_csm_ca_client_wipe(naion_csm_ca_client *client) {
