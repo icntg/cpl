@@ -13,9 +13,9 @@
 
 #include "api.hpp"
 
-// CM_*/SetupDi* 通过 cpl::sys::api 动态加载（见 sys.hpp 的 CfgMgr32/SetupAPI
-// namespace）。不再静态链接 setupapi.lib/cfgmgr32.lib —— 这两个 lib 在
-// v141_xp 的 x86 SDK 目录缺失，动态加载兼容性更好。
+// CM_*/SetupDi* are loaded dynamically through cpl::sys::api (see the CfgMgr32/SetupAPI
+// namespaces in sys.hpp). setupapi.lib/cfgmgr32.lib are no longer linked statically — these two libs are
+// missing from the x86 SDK directory of v141_xp; dynamic loading is more compatible.
 
 using namespace std;
 
@@ -23,7 +23,7 @@ namespace cpl {
     namespace win32 {
         namespace hardware {
 
-            // ── 设备信息结构 ──────────────────────────────────────────
+            // ── Device information structures ─────────────────────────
             // UsbDeviceInfo holds the properties of one present device that
             // can be used for keyword and VID/PID matching.
             struct UsbDeviceInfo {
@@ -34,7 +34,7 @@ namespace cpl {
                 DEVINST devInst;      // for CM_Disable_DevNode
             };
 
-            // ── 禁用设备（修复版） ────────────────────────────────────
+            // ── Disable a device (fixed version) ──────────────────────
             // Disable a device by its DEVINST handle.  Uses
             // CM_Disable_DevNode with CM_DISABLE_PERSISTENT so the disable
             // survives reboot (safer for security scenarios than flag 0).
@@ -68,7 +68,7 @@ namespace cpl {
                 return DisableDeviceByDevInst(devInst);
             }
 
-            // ── 枚举所有在线设备 ─────────────────────────────────────
+            // ── Enumerate all present devices ────────────────────────
             // EnumeratePresentDevices iterates all present devices via
             // SetupDiGetClassDevsW(DIGCF_ALLCLASSES|DIGCF_PRESENT) and
             // invokes the callback with each device's UsbDeviceInfo.
@@ -80,7 +80,7 @@ namespace cpl {
                 if (!sa.SetupDiGetClassDevsW || !sa.SetupDiEnumDeviceInfo
                     || !sa.SetupDiGetDeviceRegistryPropertyW
                     || !sa.SetupDiDestroyDeviceInfoList) {
-                    return; // SetupAPI 不可用，跳过枚举
+                    return; // SetupAPI unavailable, skip enumeration
                 }
 
                 HDEVINFO hDevInfo = sa.SetupDiGetClassDevsW(
@@ -139,7 +139,7 @@ namespace cpl {
                 sa.SetupDiDestroyDeviceInfoList(hDevInfo);
             }
 
-            // ── 从 HardwareID 提取 VID/PID ──────────────────────────
+            // ── Extract VID/PID from a HardwareID ───────────────────
             // Extract VID and PID from a hardware ID string like
             // "USB\VID_0483&PID_572B&REV_0100".  Returns true on success.
             inline bool ExtractVidPid(const wstring &hwId,
@@ -166,7 +166,7 @@ namespace cpl {
                 return foundVid;  // VID is mandatory; PID is optional
             }
 
-            // ── wstring 大小写不敏感包含查找 ─────────────────────────
+            // ── Case-insensitive wstring containment lookup ──────────
             inline bool WStringContainsCI(const wstring &haystack,
                                           const wstring &needle) {
                 if (needle.empty()) return false;
@@ -176,7 +176,7 @@ namespace cpl {
                 return h.find(n) != wstring::npos;
             }
 
-            // ── 按关键字禁用设备 ─────────────────────────────────────
+            // ── Disable devices by keyword ───────────────────────────
             // Scan all present devices; if the description, class name, or
             // friendly name contains any of the keywords (case-insensitive
             // substring match), disable the device.  Returns the number of
@@ -215,7 +215,7 @@ namespace cpl {
                 return disabled;
             }
 
-            // ── 按 VID:PID 禁用设备 ──────────────────────────────────
+            // ── Disable devices by VID:PID ───────────────────────────
             // Scan all present devices; if the hardware ID's VID and PID
             // match any entry in vidPidList (format "VID:PID", e.g.
             // "0483:572B"), disable the device.  If a PID is omitted

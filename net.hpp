@@ -460,24 +460,24 @@ namespace cpl {
         }
 
         // ====================================================================
-        // cpl::net::url — 最小 URL 解析器
+        // cpl::net::url — minimal URL parser
         // --------------------------------------------------------------------
-        // 用于 ifw 配置的接收服务地址解析（internal_server / internal_http）。
-        // 支持 udp://host:port 和 http://host:port/path 两种形式。
-        // host 既可能是 IP（交给 ipv4::IPStringToUINT32 校验）也可能是域名
-        // （原样保留，由调用方做 DNS 解析）。仅 header-only，不引新依赖。
+        // Parses the receiver service addresses of the ifw configuration (internal_server / internal_http).
+        // Supports the two forms udp://host:port and http://host:port/path.
+        // host may be either an IP (verified by ipv4::IPStringToUINT32) or a domain name
+        // (kept as is; the caller does the DNS resolution). Header-only; introduces no new dependencies.
         // ====================================================================
         namespace url {
-            // 解析后的 URL 各部分。
+            // The parsed parts of a URL.
             struct Components {
-                std::string scheme;   // 协议，已转小写："udp" / "http"
-                std::string host;     // 主机，IP 或域名（原样保留，不去空白）
-                uint16_t port{0};     // 端口
-                std::string path;     // 路径，仅 http 有（如 "/ifw"）；udp 为空
+                std::string scheme;   // protocol, lower-cased: "udp" / "http"
+                std::string host;     // host, an IP or a domain name (kept as is, whitespace not stripped)
+                uint16_t port{0};     // port
+                std::string path;     // path, only present for http (e.g. "/ifw"); empty for udp
             };
 
-            // 解析 udp://host:port 或 http://host:port/path。
-            // 失败返回 Errors::UrlParse。host 为空或端口非法即报错。
+            // Parses udp://host:port or http://host:port/path.
+            // Returns Errors::UrlParse on failure. An empty host or an invalid port is an error.
             inline cpl::Result<Components> Parse(const std::string &in) {
                 Components out{};
                 const auto s = strings::Trim(in);
@@ -485,7 +485,7 @@ namespace cpl {
                     return Err(cpl::Error(Errors::UrlParse, "url is empty" CPL_FILE_AND_LINE));
                 }
 
-                // 1) 找 "://" 拆 scheme 与剩余
+                // 1) Find "://" and split off the scheme from the rest
                 const auto sep = s.find("://");
                 if (sep == std::string::npos || sep == 0) {
                     return Err(cpl::Error(Errors::UrlParse, "missing scheme separator ://" CPL_FILE_AND_LINE));
@@ -495,21 +495,21 @@ namespace cpl {
                     return Err(cpl::Error(Errors::UrlParse, "unsupported scheme" CPL_FILE_AND_LINE));
                 }
 
-                // 2) 剩余：host[:port][/path]
+                // 2) The rest: host[:port][/path]
                 std::string rest = s.substr(sep + 3);
                 if (rest.empty()) {
                     return Err(cpl::Error(Errors::UrlParse, "missing host" CPL_FILE_AND_LINE));
                 }
 
-                // 3) 取 path（首个 / 之后，仅 http 关心，但都先切掉）
+                // 3) Take the path (everything after the first /; only http uses it, but it is cut off for both)
                 std::string path;
                 const auto slash = rest.find('/');
                 if (slash != std::string::npos) {
-                    path = rest.substr(slash);   // 含前导 /
+                    path = rest.substr(slash);   // includes the leading /
                     rest = rest.substr(0, slash); // host[:port]
                 }
 
-                // 4) host 与 port：以最后一个冒号拆（IPv6 暂不支持，host 内不含冒号）
+                // 4) host and port: split at the last colon (IPv6 is not supported yet, so host contains no colon)
                 const auto colon = rest.rfind(':');
                 std::string hostPart;
                 std::string portPart;
@@ -524,7 +524,7 @@ namespace cpl {
                     return Err(cpl::Error(Errors::UrlParse, "host is empty" CPL_FILE_AND_LINE));
                 }
 
-                // 5) 解析端口（必须为数字且在 1~65535）
+                // 5) Parse the port (must be numeric and in the range 1~65535)
                 uint16_t port = 0;
                 if (portPart.empty() || !strings::IsDigital(portPart)) {
                     return Err(cpl::Error(Errors::UrlParse, "port is missing or non-numeric" CPL_FILE_AND_LINE));
@@ -543,7 +543,7 @@ namespace cpl {
 
                 out.host = hostPart;
                 out.port = port;
-                // udp 不使用 path；http 保留 path（无 / 则为空）
+                // udp does not use the path; http keeps it (empty if there is no /)
                 out.path = (out.scheme == "http") ? path : std::string{};
                 return out;
             }

@@ -279,10 +279,10 @@ namespace cpl {
 
             namespace path {
                 inline Result<std::string> GetCurrentPath() {
-                    // 优先用 GetModuleFileNameA（kernel32 自 Win95 就有，XP 完美支持，
-                    // 不需 psapi/跨进程 API）。这是查自身进程 exe 全路径的最可靠方式，
-                    // Vista+ 的 QueryFullProcessImageNameA 和 psapi 的 GetModuleFileNameExA
-                    // 在 XP 上不可用/行为受限。
+                    // Prefer GetModuleFileNameA (in kernel32 since Win95, fully supported on XP, needs no psapi or
+                    // cross-process API). It is the most reliable way to get the full exe path of the own process;
+                    // Vista+ QueryFullProcessImageNameA and psapi's GetModuleFileNameExA are unavailable or
+                    // restricted on XP.
                     char buffer[MAX_PATH << 1] = {};
                     const auto &api = api::API::Instance();
                     if (api.Kernel32.GetModuleFileNameA) {
@@ -291,8 +291,8 @@ namespace cpl {
                             return std::string(buffer);
                         }
                     }
-                    // fallback：跨进程查询路径（Vista+ 完整支持，XP 上对自身进程也可能
-                    // 因 psapi 不可用而失败，但保留作兜底）。
+                    // Fallback: the cross-process query path (fully supported on Vista+; on XP it may fail even for
+                    // the own process because psapi is unavailable, but it is kept as a last resort).
                     return process::GetProcessPath(::GetCurrentProcessId());
                 }
 
@@ -574,11 +574,11 @@ namespace cpl {
                         hDup, nullptr, const_cast<LPSTR>(mutableCmd.data()), nullptr, nullptr, FALSE,
                         env != nullptr ? CREATE_UNICODE_ENVIRONMENT : 0, env, nullptr, &si, &pi);
                     if (!ok) {
-                        // Fallback: CreateProcessAsUserA 需要 SE_TCB_NAME 特权，非服务进程
-                        // （如 SSH 启动的 /svcwnd）无此特权，返回 ERROR_NO_TOKEN(0x522) 等。
-                        // 此时改用普通 CreateProcessA（当前进程身份），保留 lpDesktop 指向
-                        // 交互桌面。XP 无会话隔离，当前进程桌面即用户桌面，能正常弹窗。
-                        // Vista+ 真服务进程有 TCB 特权，走 CreateProcessAsUserA 成功。
+                        // Fallback: CreateProcessAsUserA needs SE_TCB_NAME; non-service processes (e.g. /svcwnd launched by SSH)
+                        // lack it and get ERROR_NO_TOKEN(0x522) etc. Fall back to plain CreateProcessA (current process identity),
+                        // keeping lpDesktop on the interactive desktop. XP has no session isolation: the current process desktop
+                        // is the user desktop, so popups work. Real service processes on Vista+ hold the TCB privilege and
+                        // succeed via CreateProcessAsUserA.
                         const DWORD err = GetLastError();
                         const BOOL ok2 = CreateProcessA(
                             nullptr, const_cast<LPSTR>(mutableCmd.data()), nullptr, nullptr, FALSE,

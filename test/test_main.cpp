@@ -1,14 +1,14 @@
-// 统一测试入口
+// Unified test entry
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "../vendor/doctest/doctest.hpp"
 
-// 初始化 libsodium
+// Initialize libsodium
 #define SODIUM_STATIC
 #include "../vendor/jedisct1/libsodium/sodium.h"
 
 #include "../win32/api.hpp"
 
-// 测试前初始化 libsodium
+// Initialize libsodium before the tests
 struct SodiumInitializer {
     SodiumInitializer() {
         if (sodium_init() < 0) {
@@ -28,11 +28,11 @@ struct Win32APIInitializer {
     }
 };
 
-// 全局初始化对象，在程序启动时初始化
+// Global initialization objects, initialized at program startup
 static SodiumInitializer sodiumInitializer{};
 static Win32APIInitializer win32APIInitializer{};
-// doctest 配置选项
-// 可以在这里添加自定义配置，例如：
+// doctest configuration options
+// Custom configuration can be added here, for example:
 // DOCTEST_CONFIG_SUPER_FAST_ASSERTS
 // DOCTEST_CONFIG_NO_EXCEPTIONS
 // DOCTEST_CONFIG_TCHAR_CHARARGS

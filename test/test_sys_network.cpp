@@ -113,7 +113,7 @@ TEST_SUITE("sys::network::wrapper::UDPSend") {
     }
 
     // ============================================================
-    // HTTPRequest 烟雾测试（不联网，只测参数校验与 URL 解析路径）
+    // HTTPRequest smoke tests (no network access; only the argument verification and URL parsing paths are tested)
     // ============================================================
     TEST_CASE_FIXTURE(WsaFixture, "HTTPRequest: empty url fails") {
         Stream body{0x01, 0x02};
@@ -126,7 +126,7 @@ TEST_SUITE("sys::network::wrapper::UDPSend") {
     TEST_CASE_FIXTURE(WsaFixture, "HTTPRequest: invalid url fails") {
         Stream body{0x01};
         Stream resp;
-        // 缺 scheme 分隔符，InternetCrackUrlA 应失败
+        // The scheme separator is missing; InternetCrackUrlA should fail
         const auto rc = HTTPRequest("not-a-valid-url", body, resp);
         CHECK_NE(rc, ERROR_SUCCESS);
         CHECK(resp.empty());
@@ -135,16 +135,16 @@ TEST_SUITE("sys::network::wrapper::UDPSend") {
     TEST_CASE_FIXTURE(WsaFixture, "HTTPRequest: https unsupported (this round)") {
         Stream body{0x01};
         Stream resp;
-        // 本轮契约仅支持 http://，https 返回 ERROR_NOT_SUPPORTED
+        // The contract of this round supports http:// only; https returns ERROR_NOT_SUPPORTED
         const auto rc = HTTPRequest("https://example.com/path", body, resp);
         CHECK_EQ(rc, ERROR_NOT_SUPPORTED);
         CHECK(resp.empty());
     }
 
 #ifdef IFW_HTTP_LIVE_TEST
-    // 真实 HTTP 往返测试（默认关闭，需要本机或网络上的 HTTP 服务端）：
-    //   启用一个监听 127.0.0.1:18080 的本地服务（如 python -m http.server），
-    //   编译时加 -DIFW_HTTP_LIVE_TEST 即可运行。
+    // Real HTTP round-trip test (off by default; needs an HTTP server on this machine or on the network):
+    //   start a local service listening on 127.0.0.1:18080 (e.g. python -m http.server),
+    //   and add -DIFW_HTTP_LIVE_TEST at compile time to run it.
     TEST_CASE_FIXTURE(WsaFixture, "HTTPRequest: live GET to local server") {
         Stream body{};
         Stream resp;

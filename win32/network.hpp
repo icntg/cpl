@@ -84,7 +84,7 @@ namespace cpl {
                         hInternetConnect,
                         httpMethod.data(),
                         httpRequestURL.data(),
-                        "HTTP/1.0",  // HTTP/1.0：避免 XP WinINet 5.1 对 chunked 解析的 bug
+                        "HTTP/1.0",  // HTTP/1.0: avoids the chunked-parsing bug of WinINet 5.1 on XP
                         httpReferer.data(),
                         nullptr,
                         flag,
@@ -98,8 +98,8 @@ namespace cpl {
                     }
                 } {
                     /**
-                     * 此处使用https发送的话，在WIN XP下会遇到12029的错误，需要勾选IE配置中支持TLS1.2的选项。
-                     * 因此暂时不考虑使用https了。
+                     * Sending over https here fails with error 12029 on Windows XP unless the TLS 1.2 option is ticked in the IE settings.
+                     * So https is not used for now.
                     */
                     LPVOID p = nullptr;
                     const auto pd = data.data();
@@ -138,10 +138,10 @@ namespace cpl {
                             LOG_F(ERROR, "[x] InternetReadFile failed: [%lu] %s", e, FormatError(e).data());
                             goto __ERROR__;
                         } else {
-                            // 正确追加响应数据：buffer 是 BYTE[]（unsigned char），
-                            // 直接 insert 到 out（cpl::Stream = vector<uint8_t>）。
-                            // 原代码错误地把 buffer 前 sizeof(指针) 字节当指针地址用，
-                            // 导致读取垃圾内存（WinINet 响应被截断为随机字节）。
+                            // Append the response data correctly: buffer is a BYTE[] (unsigned char),
+                            // insert it directly into out (cpl::Stream = vector<uint8_t>).
+                            // The original code wrongly treated the first sizeof(pointer) bytes of buffer as a pointer address,
+                            // reading garbage memory (the WinINet response was truncated to random bytes).
                             out.insert(out.end(), buffer, buffer + dwBytesRead);
                         }
                     }
@@ -284,7 +284,7 @@ namespace cpl {
                     const BYTE status,
                     const string &mac
                 ) {
-                    // 通信格式：timestamp, status, mac
+                    // Wire format: timestamp, status, mac
 
                     INT32 retCode = ERROR_SUCCESS;
                     string data{};
@@ -445,53 +445,62 @@ namespace cpl {
                 }
 
                 // ==============================================================
-                // HTTPRequest — 自包含的 WinINet HTTP 客户端
+                // HttpRequest - self-contained WinINet HTTP client
                 // --------------------------------------------------------------
-                // 供 ifw 的 HTTP 长轮询（心跳 + 配置热重载触发）和 HTTP 上报复用。
+                // The heartbeat and the plugin download need the status code of the answer
+                // and one deadline per phase, so this is the form that they use:
+                //   - A status code of 400 or 500 is a successful result that carries the body.
+                //     Only transport problems are errors, and their code is the code of WinINet.
+                //   - Connect, send and receive each have their own timeout.
+                //   - The body is read in small pieces. A body over maxBodyBytes is an error.
                 //
-                // 设计与 UDPSend 对齐：
-                //   - 完全自包含：通过 cpl::sys::api::API::Instance().WinINet 访问
-                //     动态加载的函数，不依赖 loguru，不依赖已废弃的旧代码。
-                //   - 返回 Win32 / WinINet 错误码，调用方据此重试或降级。
-                //
-                // 长轮询关键点：
-                //   - 必须通过 InternetSetOptionA 设置接收超时（默认仅 30s），
-                //     否则长轮询会因服务端 hold 请求而提前超时失败。
-                //   - 每次调用新建会话并关闭所有句柄，简单可靠（下轮若需复用
-                //     keep-alive 可在调用方维护会话）。
-                //
-                // 契约（本轮约定最简）：
-                //   POST url，请求体=心跳；服务端 hold 住，配置变才返回。
-                //   收到响应即视为"配置已更新"，调用方重读 .jwt。
+                // The design is aligned with UDPSend:
+                //   - Fully self-contained: accesses the dynamically loaded functions through
+                //     cpl::sys::api::API::Instance().WinINet; depends neither on loguru nor on the deprecated legacy code.
+                //   - Each call creates a new session and closes all handles; simple and reliable (if keep-alive
+                //     reuse is needed in the next round, the caller can maintain the session).
+                //   - Only http:// is supported, as the transport constraints of Windows XP ask.
                 // ==============================================================
-                inline INT32 HTTPRequest(
+                struct HttpOptions {
+                    uint32_t connectTimeoutMs = 10000;
+                    uint32_t sendTimeoutMs = 30000;
+                    uint32_t recvTimeoutMs = 60000;
+                    size_t maxBodyBytes = 256 * 1024; // 0: no limit
+                };
+
+                // One HTTP response. The status code is 0 when WinINet did not report one.
+                struct HttpResponse {
+                    int status = 0;
+                    Stream body{};
+                };
+
+                inline cpl::Result<HttpResponse> HttpRequest(
                     _In_ const string &url,
                     _In_ const Stream &body,
-                    _Out_ Stream &response,
                     _In_ const char *method = "POST",
-                    _In_ const uint32_t recvTimeoutMs = 65000u
-                ) {
-                    response.clear();
+                    _In_ const HttpOptions &options = HttpOptions()) {
+                    HttpResponse response{};
                     const auto &inet = cpl::sys::api::API::Instance().WinINet;
 
-                    // 1) 必需函数检查（InternetSetOptionA 缺失会导致超时不可控，
-                    //    视为不可用）
+                    // 1) Check the required functions. A missing HttpQueryInfoA leaves the status
+                    //    code unknown, and a missing InternetSetOptionA leaves the timeouts
+                    //    uncontrollable, so both make WinINet unusable here.
                     if (!inet.InternetOpenA || !inet.InternetConnectA
                         || !inet.HttpOpenRequestA || !inet.HttpSendRequestA
                         || !inet.InternetReadFile || !inet.InternetCloseHandle
-                        || !inet.InternetCrackUrlA || !inet.InternetSetOptionA) {
-                        return ERROR_INVALID_FUNCTION; // WinINet 未就绪
+                        || !inet.InternetSetOptionA || !inet.HttpQueryInfoA) {
+                        return cpl::MakeErr(ERROR_INVALID_FUNCTION, "[X] HttpRequest: WinINet is not ready" CPL_FILE_AND_LINE);
                     }
 
-                    // 2) 解析 URL。InternetCrackUrlA 在 XP WinINet 5.1 上对长路径
-                    //    解析有 bug（dwUrlPathLength 可能被截断，导致 404）。
-                    //    手动解析 http://host:port/path 格式（契约仅支持 http）。
+                    // 2) Parse the URL. InternetCrackUrlA has a bug parsing long paths on XP WinINet 5.1
+                    //    (dwUrlPathLength may be truncated, causing 404), so the http://host:port/path
+                    //    format is parsed by hand.
                     if (url.compare(0, 7, "http://") != 0) {
-                        return ERROR_NOT_SUPPORTED;
+                        return cpl::MakeErr(ERROR_NOT_SUPPORTED, "[X] HttpRequest: only http:// is supported" CPL_FILE_AND_LINE);
                     }
                     const auto hostStart = 7;
                     const auto slashPos = url.find('/', hostStart);
-                    string hostPort;  // host:port
+                    string hostPort;
                     string path;
                     if (slashPos == string::npos) {
                         hostPort = url.substr(hostStart);
@@ -500,7 +509,6 @@ namespace cpl {
                         hostPort = url.substr(hostStart, slashPos - hostStart);
                         path = url.substr(slashPos);
                     }
-                    // 拆 hostPort → host + port
                     string host;
                     INTERNET_PORT port = 80;
                     const auto colonPos = hostPort.find(':');
@@ -511,40 +519,48 @@ namespace cpl {
                         host = hostPort;
                     }
                     if (host.empty() || port == 0) {
-                        return ERROR_INVALID_PARAMETER;
+                        return cpl::MakeErr(ERROR_INVALID_PARAMETER, "[X] HttpRequest: the URL has no host or port" CPL_FILE_AND_LINE);
                     }
 
-                    // 3) 打开会话、连接、请求（RAII 风格，出错统一 goto cleanup）
+                    // 3) Open the session, the connection and the request. The defer closes every
+                    //    handle that is open on every exit.
                     HINTERNET hSession = nullptr;
                     HINTERNET hConnect = nullptr;
                     HINTERNET hRequest = nullptr;
-                    INT32 retCode = ERROR_SUCCESS;
+                    const auto closeAll = cpl::base::MakeDefer([&] {
+                        if (hRequest) { inet.InternetCloseHandle(hRequest); }
+                        if (hConnect) { inet.InternetCloseHandle(hConnect); }
+                        if (hSession) { inet.InternetCloseHandle(hSession); }
+                    });
+                    const auto setOption = [&](HINTERNET handle, const DWORD option, const uint32_t milliseconds) {
+                        DWORD value = milliseconds;
+                        (void) inet.InternetSetOptionA(handle, option, &value, sizeof(value));
+                    };
+                    // A timeout of 0 takes the default value of HttpOptions.
+                    const HttpOptions defaults;
+                    const auto connectTimeout = options.connectTimeoutMs != 0 ? options.connectTimeoutMs : defaults.connectTimeoutMs;
+                    const auto sendTimeout = options.sendTimeoutMs != 0 ? options.sendTimeoutMs : defaults.sendTimeoutMs;
+                    const auto recvTimeout = options.recvTimeoutMs != 0 ? options.recvTimeoutMs : defaults.recvTimeoutMs;
 
                     hSession = inet.InternetOpenA(
                         "ifw", INTERNET_OPEN_TYPE_DIRECT,
                         nullptr, nullptr, 0);
                     if (!hSession) {
-                        return static_cast<INT32>(GetLastError());
+                        return cpl::MakeErr(static_cast<int64_t>(GetLastError()), "[X] HttpRequest: InternetOpenA failed" CPL_FILE_AND_LINE);
                     }
-
-                    // 设超时：接收/连接/发送（长轮询核心，作用于 hSession 下所有连接）
-                    DWORD optVal = recvTimeoutMs;
-                    inet.InternetSetOptionA(hSession, INTERNET_OPTION_RECEIVE_TIMEOUT,
-                                            &optVal, sizeof(optVal));
-                    inet.InternetSetOptionA(hSession, INTERNET_OPTION_CONNECT_TIMEOUT,
-                                            &optVal, sizeof(optVal));
-                    inet.InternetSetOptionA(hSession, INTERNET_OPTION_SEND_TIMEOUT,
-                                            &optVal, sizeof(optVal));
+                    // The options of the session hold for the connection and for the requests below.
+                    setOption(hSession, INTERNET_OPTION_CONNECT_TIMEOUT, connectTimeout);
+                    setOption(hSession, INTERNET_OPTION_SEND_TIMEOUT, sendTimeout);
+                    setOption(hSession, INTERNET_OPTION_RECEIVE_TIMEOUT, recvTimeout);
 
                     hConnect = inet.InternetConnectA(
                         hSession, host.c_str(), port,
                         nullptr, nullptr, INTERNET_SERVICE_HTTP, 0, 0);
                     if (!hConnect) {
-                        retCode = static_cast<INT32>(GetLastError());
-                        goto cleanup;
+                        return cpl::MakeErr(static_cast<int64_t>(GetLastError()), "[X] HttpRequest: InternetConnectA failed" CPL_FILE_AND_LINE);
                     }
 
-                    // keep-alive 便于长轮询复用连接；NO_AUTH 避免 NTLM 等自动认证
+                    // keep-alive lets a series of requests reuse the connection; NO_AUTH avoids NTLM and other automatic authentication
                     hRequest = inet.HttpOpenRequestA(
                         hConnect, method, path.c_str(), nullptr, nullptr,
                         nullptr,
@@ -552,43 +568,73 @@ namespace cpl {
                             | INTERNET_FLAG_RELOAD,
                         0);
                     if (!hRequest) {
-                        retCode = static_cast<INT32>(GetLastError());
-                        goto cleanup;
+                        return cpl::MakeErr(static_cast<int64_t>(GetLastError()), "[X] HttpRequest: HttpOpenRequestA failed" CPL_FILE_AND_LINE);
                     }
+                    // The request handle takes the send and receive timeouts of its own.
+                    setOption(hRequest, INTERNET_OPTION_SEND_TIMEOUT, sendTimeout);
+                    setOption(hRequest, INTERNET_OPTION_RECEIVE_TIMEOUT, recvTimeout);
 
-                    // 4) 发送请求（POST 带请求体；GET 时 HttpSendRequestA body 传 0）
+                    // 4) Send the request (POST carries a body; for GET, pass 0 as the HttpSendRequestA body)
                     const char *headers = "Content-Type: application/octet-stream\r\n";
                     const LPVOID pBody = body.empty() ? nullptr
                                                        : const_cast<LPVOID>(static_cast<const void *>(body.data()));
                     const DWORD bodyLen = static_cast<DWORD>(body.size());
-                    const DWORD hdrLen = (DWORD)-1; // 让 WinINet 按 \0 计算
+                    const DWORD hdrLen = (DWORD)-1; // Let WinINet count up to the \0
                     if (!inet.HttpSendRequestA(hRequest, headers, hdrLen, pBody, bodyLen)) {
-                        retCode = static_cast<INT32>(GetLastError());
-                        goto cleanup;
+                        return cpl::MakeErr(static_cast<int64_t>(GetLastError()), "[X] HttpRequest: HttpSendRequestA failed" CPL_FILE_AND_LINE);
                     }
 
-                    // 5) 读响应（循环直到 InternetReadFile 返回 0 字节）
+                    // 5) The status code, as a number.
+                    {
+                        DWORD status = 0;
+                        DWORD statusSize = sizeof(status);
+                        if (inet.HttpQueryInfoA(hRequest, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &status, &statusSize, nullptr)) {
+                            response.status = static_cast<int>(status);
+                        }
+                    }
+
+                    // 6) Read the response (loop until InternetReadFile returns 0 bytes)
                     {
                         BYTE buf[4096];
                         DWORD bytesRead = 0;
                         for (;;) {
                             bytesRead = 0;
                             if (!inet.InternetReadFile(hRequest, buf, sizeof(buf), &bytesRead)) {
-                                retCode = static_cast<INT32>(GetLastError());
-                                goto cleanup;
+                                return cpl::MakeErr(static_cast<int64_t>(GetLastError()), "[X] HttpRequest: InternetReadFile failed" CPL_FILE_AND_LINE);
                             }
                             if (bytesRead == 0) {
-                                break; // 响应读完
+                                break; // response fully read
                             }
-                            response.insert(response.end(), buf, buf + bytesRead);
+                            if (options.maxBodyBytes != 0
+                                && response.body.size() + bytesRead > options.maxBodyBytes) {
+                                return cpl::MakeErr(ERROR_MORE_DATA, "[X] HttpRequest: the response body is larger than the limit" CPL_FILE_AND_LINE);
+                            }
+                            response.body.insert(response.body.end(), buf, buf + bytesRead);
                         }
                     }
+                    return response;
+                }
 
-                cleanup:
-                    if (hRequest) { inet.InternetCloseHandle(hRequest); }
-                    if (hConnect) { inet.InternetCloseHandle(hConnect); }
-                    if (hSession) { inet.InternetCloseHandle(hSession); }
-                    return retCode;
+                // HTTPRequest is the form with one timeout for every phase and without the status
+                // code. It keeps the interface that the callers of the long polling used.
+                inline INT32 HTTPRequest(
+                    _In_ const string &url,
+                    _In_ const Stream &body,
+                    _Out_ Stream &response,
+                    _In_ const char *method = "POST",
+                    _In_ const uint32_t recvTimeoutMs = 65000u) {
+                    response.clear();
+                    HttpOptions options;
+                    options.connectTimeoutMs = recvTimeoutMs;
+                    options.sendTimeoutMs = recvTimeoutMs;
+                    options.recvTimeoutMs = recvTimeoutMs;
+                    options.maxBodyBytes = 0;
+                    const auto result = HttpRequest(url, body, method, options);
+                    if (!result) {
+                        return static_cast<INT32>(result.error().Code.i64);
+                    }
+                    response = result.value().body;
+                    return ERROR_SUCCESS;
                 }
             } // namespace wrapper
         } // namespace network

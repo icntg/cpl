@@ -1,0 +1,4 @@
+# clangd configuration: points at the compilation database that the Ninja build generates.
+# For code indexing only (Serena/clangd); it does not affect the VS build.
+CompileFlags:
+  CompilationDatabase: build-clangd

@@ -55,9 +55,9 @@ namespace cpl {
                 }
 
                 /**
-                 * 使用CreateThread启动线程，可能会导致内存泄漏。
-                 * 适用场景：一次性启动，无限循环的任务。
-                 * 是否会引入InitializeCriticalSectionEx，未知。
+                 * Starting the thread with CreateThread may cause memory leaks.
+                 * Applicable scenario: a task that is started once and loops forever.
+                 * Whether it pulls in InitializeCriticalSectionEx is unknown.
                  */
                 void Start() {
                     this->threadHandle = CreateThread(
@@ -76,8 +76,8 @@ namespace cpl {
                 }
 
                 /**
-                 * 使用_beginthreadex启动线程，不会导致内存泄漏，但会引入InitializeCriticalSectionEx不兼容XP。
-                 * 适用场景，需要频繁启动、关闭线程。
+                 * Starting the thread with _beginthreadex does not cause memory leaks, but pulls in InitializeCriticalSectionEx, which is incompatible with XP.
+                 * Applicable scenario: threads that need to be started and closed frequently.
                  */
                 void StartEx() {
                     this->threadHandle = reinterpret_cast<HANDLE>(_beginthreadex(

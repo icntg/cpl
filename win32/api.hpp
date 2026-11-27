@@ -434,6 +434,7 @@ namespace WinINet {
         InternetCloseHandle InternetCloseHandle{};
         InternetCrackUrlA InternetCrackUrlA{};
         InternetSetOptionA InternetSetOptionA{};
+        HttpQueryInfoA HttpQueryInfoA{};
 
         Int32Result Load() override {
             for (const auto& dll : DLL_NAMES) {
@@ -501,6 +502,13 @@ namespace WinINet {
                     any_loaded = true;
                     InternetSetOptionA = ret_InternetSetOptionA.value<>();
                 }
+                const auto ret_HttpQueryInfoA = api::DynamicModule::LoadFunction<::cpl::sys::api::WinINet::HttpQueryInfoA>("HttpQueryInfoA");
+                if (!ret_HttpQueryInfoA) {
+                    ok = false;
+                } else {
+                    any_loaded = true;
+                    HttpQueryInfoA = ret_HttpQueryInfoA.value<>();
+                }
                 if (ok && (any_loaded || DLL_NAMES.size() == 1)) {
                     return 0;
                 }
@@ -517,6 +525,7 @@ namespace WinINet {
             InternetCloseHandle = nullptr;
             InternetCrackUrlA = nullptr;
             InternetSetOptionA = nullptr;
+            HttpQueryInfoA = nullptr;
             const auto unloadRet = api::DynamicModule::Unload();
             if (!unloadRet) {
                 return unloadRet;

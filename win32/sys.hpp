@@ -89,9 +89,9 @@ namespace cpl {
                     }
                     return MakeErr(Errors::WideCharToMultiByte, es.value());
                 }
-                // WideCharToMultiByte(..., -1, ...) 返回值 r0 含 null 终止符。
-                // 构造 string 时去掉末尾的 null，否则后续 TLV 编码会把 NUL
-                // 写入 payload，PG 的 text 列会拒绝（invalid byte sequence）。
+                // The return value r0 of WideCharToMultiByte(..., -1, ...) includes the null terminator.
+                // Drop the trailing null when constructing the string, otherwise the later TLV encoding writes NUL
+                // into the payload, which the PG text column rejects (invalid byte sequence).
                 return std::string{buffer.begin(), buffer.begin() + r0 - 1};
             }
         }
@@ -117,8 +117,8 @@ namespace cpl {
                     }
                     return MakeErr(Errors::MultiByteToWideChar, es.value());
                 }
-                // MultiByteToWideChar(..., -1, ...) 返回值含 null 终止符。
-                // 构造 wstring 时去掉末尾的 null，否则后续 find/compare 会出错。
+                // The return value of MultiByteToWideChar(..., -1, ...) includes the null terminator.
+                // Drop the trailing null when constructing the wstring, otherwise later find/compare go wrong.
                 return std::wstring{buffer.begin(), buffer.begin() + r0 - 1};
             }
         }
@@ -313,7 +313,7 @@ namespace cpl {
                 //         out
                 //     );
                 //     LOG_D("%s\n", es.value_or("[X] format failed" CPL_FILE_AND_LINE).data());
-                //     // 可以为空
+                //     // Can be null
                 //     return 0;
                 // }
 
@@ -381,12 +381,12 @@ namespace cpl {
                         if (bFunctionNecessary) {
                             return MakeErr(e, es.value());
                         }
-                        // 非 necessary 函数 GetProcAddress 失败：返回 Err 而非 nullptr。
-                        // 原 return nullptr 会被 Result<FuncPtrType> 当作"成功但值为 null"，
-                        // 导致 api_gen 生成的 Load 循环误判 any_loaded=true 提前结束 DLL
-                        // 回退（XP 上 GetModuleFileNameExA 在 kernel32 找不到返回 nullptr
-                        // 被当成功，循环不再尝试 PsAPI.dll）。返回 Err 让 !ret 为 true，
-                        // any_loaded 保持 false，循环继续下一个 DLL。
+                        // GetProcAddress failed for a non-necessary function: return Err instead of nullptr.
+                        // The former return nullptr was taken by Result<FuncPtrType> as "success with a null value",
+                        // making the api_gen-generated Load loop misjudge any_loaded=true and end the DLL
+                        // fallback early (on XP, GetModuleFileNameExA is not found in kernel32 and returns nullptr,
+                        // which counted as success, so the loop no longer tried PsAPI.dll). Returning Err makes !ret true,
+                        // keeps any_loaded false, and the loop continues with the next DLL.
                         return MakeErr(e, es.value());
                     }
                     FunctionMap()[upperModuleNameFunctionName] = reinterpret_cast<void *>(ptr);
@@ -400,7 +400,7 @@ namespace cpl {
                         return Err(es.error().Append(CPL_FILE_AND_LINE));
                     }
                     LOG_D("%s\n", es.value().data());
-                    // 可以为空
+                    // Can be null
                     return ptr;
                 }
             };
@@ -697,12 +697,21 @@ namespace cpl {
                     _Inout_ LPURL_COMPONENTSA lpUrlComponents
                 );
 
-                // 设置会话/连接选项（接收/连接/发送超时等）。长轮询必需。
+                // Sets session/connection options (receive/connect/send timeouts, etc.). Required by long polling.
                 typedef BOOL (WINAPI*InternetSetOptionA)(
                     _In_ HINTERNET hInternet,
                     _In_ DWORD dwOption,
                     _Inout_ LPVOID lpBuffer,
                     _In_ DWORD dwBufferLength
+                );
+
+                // Reads one piece of information about a request or response, such as the status code.
+                typedef BOOL (WINAPI*HttpQueryInfoA)(
+                    _In_ HINTERNET hRequest,
+                    _In_ DWORD dwInfoLevel,
+                    _Inout_ LPVOID lpBuffer,
+                    _Inout_ LPDWORD lpdwBufferLength,
+                    _Inout_opt_ LPDWORD lpdwIndex
                 );
             }
 
@@ -832,7 +841,7 @@ namespace cpl {
             namespace PsAPI {
                 NOT_NECESSARY const std::vector<std::string> DLL_NAMES = {"Kernel32.dll", "PsAPI.dll",};
 
-                /* 这个方法V1（XP）在PsAPI.dll，V2在Kernel32.dll */
+                /* V1 (XP) of this function is in PsAPI.dll, V2 in Kernel32.dll */
                 NOT_NECESSARY typedef DWORD (WINAPI*GetModuleFileNameExA)(
                     _In_ HANDLE hProcess,
                     _In_opt_ HMODULE hModule,
@@ -840,14 +849,14 @@ namespace cpl {
                     _In_ DWORD nSize
                 );
 
-                /* 这个方法V1在PsAPI.dll，V2在Kernel32.dll */
+                /* V1 of this function is in PsAPI.dll, V2 in Kernel32.dll */
                 NOT_NECESSARY typedef BOOL (WINAPI*EnumProcesses)(
                     _Out_ DWORD *lpidProcess,
                     _In_ DWORD cb,
                     _Out_ LPDWORD lpcbNeeded
                 );
 
-                /* 这个方法V1（XP）在PsAPI.dll，V2在Kernel32.dll */
+                /* V1 (XP) of this function is in PsAPI.dll, V2 in Kernel32.dll */
                 NOT_NECESSARY typedef BOOL (WINAPI*EnumProcessModules)(
                     _In_ HANDLE hProcess,
                     _Out_ HMODULE *lphModule,
@@ -855,7 +864,7 @@ namespace cpl {
                     _Out_ LPDWORD lpcbNeeded
                 );
 
-                /* 这个方法V1（XP）在PsAPI.dll，V2在Kernel32.dll */
+                /* V1 (XP) of this function is in PsAPI.dll, V2 in Kernel32.dll */
                 NOT_NECESSARY typedef BOOL (WINAPI*EnumProcessModulesEx)(
                     _In_ HANDLE hProcess,
                     _Out_ HMODULE *lphModule,
@@ -919,9 +928,9 @@ namespace cpl {
                     _Inout_ PDWORD lpdwSize
                 );
 
-                // GetModuleFileNameA: kernel32 自 Win95 就有，XP 完美支持。
-                // 用于 GetCurrentPath 取自身进程 exe 全路径（无需 psapi/跨进程 API）。
-                // 标记为必要加载（kernel32 必有此导出）。
+                // GetModuleFileNameA: available in kernel32 since Win95, fully supported on XP.
+                // Used by GetCurrentPath to get the full exe path of the own process (no psapi/cross-process API needed).
+                // Marked as necessary to load (kernel32 always exports it).
                 typedef DWORD (WINAPI*GetModuleFileNameA)(
                     _In_opt_ HMODULE hModule,
                     _Out_ LPSTR lpFilename,
@@ -983,9 +992,9 @@ namespace cpl {
                 NOT_NECESSARY const std::vector<std::string> DLL_NAMES = {"libcrypto.dll", "libeay32.dll",};
             }
 
-            // USB 设备管理（CM_* 来自 cfgmgr32.dll，SetupDi* 来自 setupapi.dll）。
-            // 用于非法 USB 设备检测/禁用。均标 NOT_NECESSARY：USB 检测是可选功能，
-            // 缺失时降级（不检测），不阻断主程序。
+            // USB device management (CM_* from cfgmgr32.dll, SetupDi* from setupapi.dll).
+            // Used to detect/disable unauthorized USB devices. All are marked NOT_NECESSARY: USB detection is optional,
+            // and degrades (no detection) when missing, without blocking the main program.
             namespace CfgMgr32 {
                 NOT_NECESSARY const std::vector<std::string> DLL_NAMES = {"cfgmgr32.dll",};
 

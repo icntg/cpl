@@ -1,6 +1,6 @@
 // utility/net.hpp — Win32-native networking helpers used by win32/api.hpp.
 //
-// Per "iphlpapi 相关挪到 win32 专属代码": the platform-independent IPv4 parsing
+// Per "move the iphlpapi-related code into win32-specific code": the platform-independent IPv4 parsing
 // (AddressRange, IPStringToUINT32, etc.) now lives in the top-level net.hpp with
 // a Result-based API. This file keeps only the Win32-native pieces that the
 // hand-written api.hpp entities still call directly:

@@ -130,12 +130,12 @@ TEST_SUITE("codec::Length") {
 
 TEST_SUITE("codec::Leb128") {
     TEST_CASE("Encode / Decode round trip across boundaries") {
-        // LEB128 边界值：每 7 bit 一个台阶。
+        // LEB128 boundary values: one step every 7 bits.
         const int64_t values[] = {
             0, 1, 126, 127, 128, 16383, 16384, 2097151, 2097152,
-            268435455,  // 2^28 - 1，4 字节边界
-            4294967295, // UINT32_MAX，5 字节
-            549755813887 // 2^39 - 1，6 字节边界
+            268435455,  // 2^28 - 1, 4-byte boundary
+            4294967295, // UINT32_MAX, 5 bytes
+            549755813887 // 2^39 - 1, 6-byte boundary
         };
         for (const auto v : values) {
             const auto enc = Must(Leb128::Encode(v));
@@ -149,13 +149,13 @@ TEST_SUITE("codec::Leb128") {
     }
 
     TEST_CASE("Encode known byte patterns") {
-        // 0 → 单字节 0x00
+        // 0 → single byte 0x00
         CHECK_EQ(Must(Leb128::Encode(0)), Stream({0x00}));
-        // 127 → 单字节 0x7F（最大单字节值）
+        // 127 → single byte 0x7F (largest single-byte value)
         CHECK_EQ(Must(Leb128::Encode(127)), Stream({0x7F}));
-        // 128 → 两字节 [0x80, 0x01]（continuation + 1）
+        // 128 → two bytes [0x80, 0x01] (continuation + 1)
         CHECK_EQ(Must(Leb128::Encode(128)), Stream({0x80, 0x01}));
-        // 300 = 0b100101100 → 两字节 [0xAC, 0x02]
+        // 300 = 0b100101100 → two bytes [0xAC, 0x02]
         CHECK_EQ(Must(Leb128::Encode(300)), Stream({0xAC, 0x02}));
     }
 
@@ -165,11 +165,11 @@ TEST_SUITE("codec::Leb128") {
     }
 
     TEST_CASE("Decode rejects empty and truncated") {
-        // 空流
+        // Empty stream
         CHECK_FALSE(Leb128::Decode(Stream{}).has_value());
-        // 截断：0x80 有 continuation bit 但无后续字节
+        // Truncated: 0x80 has the continuation bit set but there is no following byte
         CHECK_FALSE(Leb128::Decode(Stream{0x80}).has_value());
-        // 截断：两字节序列只给一字节且 continuation 置位
+        // Truncated: a two-byte sequence of which only one byte is given, with continuation set
         CHECK_FALSE(Leb128::Decode(Stream{0x80, 0x80}).has_value());
     }
 }

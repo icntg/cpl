@@ -12,7 +12,7 @@ using namespace std;
 namespace cpl {
     namespace sys {
         namespace service {
-            // 安装服务
+            // Install the service
             inline int32_t Install (
                     const wstring &ServiceName,
                     const wstring &DisplayName,
@@ -62,7 +62,7 @@ namespace cpl {
                 return retCode;
             }
 
-            // 卸载服务
+            // Uninstall the service
             inline int32_t Uninstall(const wstring &ServiceName) {
                 int32_t retCode{};
                 SC_HANDLE scmHandle{};
@@ -94,12 +94,12 @@ namespace cpl {
             }
 
             /**
-             * 前置声明
+             * Forward declaration
              */
             class WindowsService;
 
             /**
-             * 使用外部类，保存实例等信息
+             * Uses an external class to store the instance and other information
              */
             class IServiceEventLoop {
                 friend class WindowsService;
@@ -167,7 +167,7 @@ namespace cpl {
                     }
                     serviceStatusHandle = r0;
 
-                    // 初始化服务状态
+                    // Initialize the service status
                     serviceStatus.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
                     serviceStatus.dwCurrentState = SERVICE_START_PENDING;
                     serviceStatus.dwControlsAccepted = SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN;
@@ -177,7 +177,7 @@ namespace cpl {
                     serviceStatus.dwWaitHint = 0;
                     SetServiceStatus(serviceStatusHandle, &serviceStatus);
 
-                    // 创建停止事件
+                    // Create the stop event
                     if (wrapper) {
                         wrapper->stopEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
                         if (!wrapper->stopEvent) {
@@ -187,22 +187,22 @@ namespace cpl {
                         }
                     }
                     {
-                        // todo 初始化可以放在这里。
+                        // todo Initialization can go here.
                     }
 
 
-                    // 初始化完成，服务开始运行
-                    // 标记服务为运行状态
+                    // Initialization finished; the service starts running
+                    // Mark the service as running
                     serviceStatus.dwCurrentState = SERVICE_RUNNING;
                     SetServiceStatus(serviceStatusHandle, &serviceStatus);
 
-                    // 调用用户提供的事件循环函数
+                    // Call the event loop function provided by the user
                     if (wrapper) {
                         wrapper->EventLoop();
                         // funcEventLoop();
                     }
 
-                    // 服务停止
+                    // Service stopped
                     serviceStatus.dwCurrentState = SERVICE_STOPPED;
                     SetServiceStatus(serviceStatusHandle, &serviceStatus);
                 }
@@ -219,8 +219,8 @@ namespace cpl {
                         case SERVICE_CONTROL_SHUTDOWN:
                             serviceStatus.dwCurrentState = SERVICE_STOP_PENDING;
                             SetServiceStatus(serviceStatusHandle, &serviceStatus);
-                            SetEvent(wrapper->stopEvent); // 通知服务停止
-                            // 停止事件循环
+                            SetEvent(wrapper->stopEvent); // Notify the service to stop
+                            // Stop the event loop
                             serviceStatus.dwCurrentState = SERVICE_STOPPED;
                             SetServiceStatus(serviceStatusHandle, &serviceStatus);
                             break;
@@ -265,18 +265,18 @@ namespace cpl {
         //         SetServiceStatus(status.serviceStatusHandle, &status.serviceStatus);
         //
         //         {
-        //             // todo 初始化可以放在这里。
+        //             // todo Initialization can go here.
         //         }
-        //         // 初始化完成，服务开始运行
+        //         // Initialization finished; the service starts running
         //         status.serviceStatus.dwCurrentState = SERVICE_RUNNING;
         //         SetServiceStatus(status.serviceStatusHandle, &status.serviceStatus);
         //
-        //         // 调用用户提供的事件循环函数
+        //         // Call the event loop function provided by the user
         //         if (funcEventLoop) {
         //             funcEventLoop();
         //         }
         //
-        //         // 服务停止
+        //         // Service stopped
         //         status.serviceStatus.dwCurrentState = SERVICE_STOPPED;
         //         SetServiceStatus(status.serviceStatusHandle, &status.serviceStatus);
         //     }
@@ -446,7 +446,7 @@ namespace cpl {
         //         return retCode;
         //     }
         //
-        //     // 服务控制处理函数
+        //     // Service control handler function
         //     static void WINAPI DefaultServiceCtrlHandler(DWORD controlCode) {
         //         auto ptrInstance = IService::GetInstance();
         //         if (nullptr == ptrInstance) {
@@ -460,7 +460,7 @@ namespace cpl {
         //             case SERVICE_CONTROL_SHUTDOWN:
         //                 instance.serviceStatus.dwCurrentState = SERVICE_STOP_PENDING;
         //                 SetServiceStatus(instance.serviceStatusHandle, &instance.serviceStatus);
-        //                 SetEvent(instance.stopEvent); // 通知服务停止
+        //                 SetEvent(instance.stopEvent); // Notify the service to stop
         //                 break;
         //             default:
         //                 break;
@@ -477,7 +477,7 @@ namespace cpl {
         //         auto serviceStatusHandle = instance.ServiceStatusHandle();
         //         auto serviceStatus = instance.ServiceStatus();
         //         auto stopEvent = instance.StopEvent();
-        //         // 注册服务控制处理函数
+        //         // Register the service control handler function
         //         serviceStatusHandle = RegisterServiceCtrlHandlerW(instance.ServiceName().data(),
         //                                                           DefaultServiceCtrlHandler);
         //         if (!serviceStatusHandle) {
@@ -486,7 +486,7 @@ namespace cpl {
         //             return;
         //         }
         //
-        //         // 初始化服务状态
+        //         // Initialize the service status
         //         serviceStatus.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
         //         serviceStatus.dwCurrentState = SERVICE_START_PENDING;
         //         serviceStatus.dwControlsAccepted = SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN;
@@ -496,7 +496,7 @@ namespace cpl {
         //         serviceStatus.dwWaitHint = 0;
         //         SetServiceStatus(serviceStatusHandle, &serviceStatus);
         //
-        //         // 创建停止事件
+        //         // Create the stop event
         //         stopEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
         //         if (!stopEvent) {
         //             serviceStatus.dwCurrentState = SERVICE_STOPPED;
@@ -504,19 +504,19 @@ namespace cpl {
         //             return;
         //         }
         //
-        //         // 标记服务为运行状态
+        //         // Mark the service as running
         //         serviceStatus.dwCurrentState = SERVICE_RUNNING;
         //         SetServiceStatus(serviceStatusHandle, &serviceStatus);
         //
-        //         // 主循环：每隔 1 秒钟处理事件
+        //         // Main loop: handle events every 1 second
         //         while (WaitForSingleObject(stopEvent, 1000) == WAIT_TIMEOUT) {
-        //             // 获取当前时间
+        //             // Get the current time
         //             // auto now = std::chrono::system_clock::now();
         //             // std::time_t now_time = std::chrono::system_clock::to_time_t(now);
         //             // std::string timeStr = std::ctime(&now_time);
-        //             // timeStr.pop_back(); // 去掉换行符
+        //             // timeStr.pop_back(); // Remove the trailing newline
         //
-        //             // // 写入文件
+        //             // // Write to the file
         //             // std::ofstream logFile("C:\\test.log", std::ios::app);
         //             // if (logFile.is_open())
         //             // {
@@ -525,16 +525,16 @@ namespace cpl {
         //             // }
         //         }
         //
-        //         // 清理资源
+        //         // Clean up resources
         //         CloseHandle(stopEvent);
         //
-        //         // 标记服务为停止状态
+        //         // Mark the service as stopped
         //         serviceStatus.dwCurrentState = SERVICE_STOPPED;
         //         SetServiceStatus(serviceStatusHandle, &serviceStatus);
         //     }
         //
         //     virtual int32_t DefaultStartTemplate() {
-        //         // 服务表
+        //         // Service table
         //         const SERVICE_TABLE_ENTRYW serviceTable[] = {
         //             {
         //                 const_cast<LPWSTR>(this->serviceName.data()),
@@ -543,7 +543,7 @@ namespace cpl {
         //             {nullptr, nullptr}
         //         };
         //
-        //         // 启动服务
+        //         // Start the service
         //         if (!StartServiceCtrlDispatcherW(serviceTable)) {
         //             const auto e = GetLastError();
         //             fprintf(stderr, "[x] StartServiceCtrlDispatcherW failed 0x%lx:%s\n", e, FormatError(e).data());

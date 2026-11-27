@@ -3,7 +3,7 @@
 // Historically this header defined its own cpl::Error / IContext / ISerializeJson
 // with a Win32-native (INT32 / _Out_) flavour. That duplicate cpl::Error clashed
 // with the top-level base.hpp (identical include guard) whenever both were pulled
-// into the same translation unit. Per "base.hpp 只保留一个", this file now
+// into the same translation unit. Per "keep only one base.hpp", this file now
 // simply re-exports the top-level base.hpp and only adds the legacy Win32-native
 // aliases that win32/api.hpp (generated from sys.hpp) still references.
 //

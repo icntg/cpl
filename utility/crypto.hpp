@@ -14,7 +14,7 @@ namespace cpl {
         class UnsafeRandom final : public base::crypto::IRandom {
         public:
             INT32 Rand(_In_ const LPCVOID buffer, _In_ const size_t size) override {
-                // 涉及参数：时间、栈地址、堆地址、PID
+                // Parameters involved: time, stack address, heap address, PID
                 {
                     static uint8_t *staticPointer = nullptr;
                     const auto now = time(nullptr);
@@ -30,7 +30,7 @@ namespace cpl {
                     memmove(&antiStackAddress, &stackAddress, sizeof(stackAddress));
                     memmove(&reverseGlobalAddress, &globalAddress, sizeof(globalAddress));
                     antiStackAddress = ~antiStackAddress;
-                    // reverse 反转
+                    // reverse: invert
                     {
                         const auto *ps = reinterpret_cast<uint8_t *>(globalAddress);
                         auto *pd = reinterpret_cast<uint8_t *>(&reverseGlobalAddress);
@@ -134,7 +134,7 @@ namespace cpl {
                     vector<BYTE> encKey{};
                     vector<BYTE> macKey{};
                     vector<BYTE> buffer{};
-                    // 初始化IV
+                    // Initialize the IV
                     {
                         const auto r00 = this->randomProvider.Rand(iv, IV_SIZE);
                         if (r00 != ERROR_SUCCESS) {
@@ -142,7 +142,7 @@ namespace cpl {
                             throw exception("[x] randomProvider.Rand failed");
                         }
                     }
-                    // 初始化encKey与macKey
+                    // Initialize encKey and macKey
                     {
                         const auto iv0 = vector<BYTE>(iv, iv + IV_SIZE);
                         const auto r00 = this->hmacFactory.CreateHMACProvider(iv0, hmacKeyEncProvider);
@@ -181,7 +181,7 @@ namespace cpl {
                             throw exception("[x] hmacFactory.CreateHMACProvider failed");
                         }
                     }
-                    // 加密
+                    // Encrypt
                     {
                         auto rc4 = RC4(encKey);
                         const auto r00 = rc4.Encrypt(buffer, cleared);
@@ -247,7 +247,7 @@ namespace cpl {
                     memmove(iv, nonce, SIZE_NONCE);
                 }
 
-                // 这里增加一个是为了保证后面合并时不被string自动添加的\x00覆盖。
+                // The extra 1 here ensures the \x00 that string appends automatically does not overwrite data during the later merge.
                 pc_enc = encrypted.data() + SIZE_HMAC16 + SIZE_NONCE + 1;
                 memmove(&p_enc, &pc_enc, sizeof(char *));
 

@@ -43,36 +43,26 @@ typedef enum {
 
 typedef int(IFW_PLUGIN_CALL *ifw_plugin_log_fn)(int level, const char *msg);
 
-// Event types carried by plugin -> afw -> receiver reports.
-// Values MUST stay aligned with udp_receiver `warning_type` (existing 1/2/3);
-// extend only, never renumber existing values.
+// Core alert types (warnwire protocol version 3). A value is the msg_type byte of
+// the alert header, so the values must stay aligned with the server
+// (DESIGN_server_architecture.md section 4). Plugins do not use these values: a
+// plugin reports through send(), and the target sensor is determined by the path.
 typedef enum {
-    IFW_EVENT_HEARTBEAT        = 0,  // afw core heartbeat (not produced by plugins)
-    IFW_EVENT_WARN_OUTBOUND_V6 = 1,  // outbound: IPv6 default route  (was warning_type 1)
-    IFW_EVENT_WARN_OUTBOUND_AD = 2,  // outbound: illegal adapter name (was warning_type 2)
-    IFW_EVENT_WARN_OUTBOUND_V4 = 3,  // outbound: IPv4 default route  (was warning_type 3)
-    IFW_EVENT_WARN_USB         = 4,  // illegal USB device
-    IFW_EVENT_WARN_CASCADE     = 5,  // illegal cascade (rogue DHCP server)
-    IFW_EVENT_WARN_WEAKPASS    = 6,  // weak password hit
-    IFW_EVENT_SUBNET_SCAN      = 7,  // subnet device probe (bulk, goes via HTTP)
+    IFW_EVENT_ILLEGAL_ADAPTER = 0,  // illegal adapter name
+    IFW_EVENT_OUTBOUND_V4     = 1,  // illegal IPv4 default route
+    IFW_EVENT_OUTBOUND_V6     = 2,  // IPv6 default route
+    IFW_EVENT_WARN_USB        = 3,  // illegal USB device
 } IfwEventType;
 
-// Plugin -> afw reporting callbacks. afw performs naion CSM encryption and
-// routes the event to the matching receiver service. Plugins only produce
-// (event_type, payload). UDP payloads must fit the naion CSM client->server
-// application budget (<=856 bytes); larger data must go via send_http.
-typedef int(IFW_PLUGIN_CALL *ifw_plugin_send_udp_fn)(uint32_t event_type,
-                                                     const void *payload,
-                                                     uint32_t len);
-typedef int(IFW_PLUGIN_CALL *ifw_plugin_send_http_fn)(uint32_t event_type,
-                                                      const void *payload,
-                                                      uint32_t len);
+// Plugin -> host reporting callback. The host encrypts the payload with naion CSM
+// and POSTs it to /sensors/<plugin id>/. The payload must fit the naion CSM
+// client -> server budget of the host build (880 bytes in the default mode).
+typedef int(IFW_PLUGIN_CALL *ifw_plugin_send_fn)(const void *payload, uint32_t len);
 
 typedef struct IfwPluginHostApi {
     uint32_t cb;
     uint32_t api_version;
-    ifw_plugin_send_udp_fn  send_udp;   // small / time-critical -> UDP
-    ifw_plugin_send_http_fn send_http;  // large / bulk          -> HTTP
+    ifw_plugin_send_fn send;  // plugin data -> host -> POST /sensors/<plugin id>/
 } IfwPluginHostApi;
 
 typedef struct IfwPluginInfo {
@@ -108,7 +98,7 @@ typedef struct IfwPluginTrailer {
 } IfwPluginTrailer;
 #pragma pack(pop)
 
-#define IFW_PLUGIN_API_VERSION 0x00010001u  // bumped: reserved -> host_api (IfwPluginHostApi)
+#define IFW_PLUGIN_API_VERSION 0x00010002u  // bumped: send_udp + send_http -> single send
 #define IFW_PLUGIN_QUERY_SYMBOL "IfwPluginQuery"
 #define IFW_PLUGIN_RUN_SYMBOL "IfwPluginRun"
 #define IFW_PLUGIN_PACKAGE_VERSION 0x0001u
@@ -126,6 +116,9 @@ namespace cpl {
             string path{};
             string configJson{};
             IfwPluginTrailer trailer{};
+            // The payload is the shared library itself: fileData[0 .. payloadSize).
+            // It ends where the configuration JSON starts.
+            size_t payloadSize{0};
         };
 
         enum class RunMode {
@@ -297,6 +290,7 @@ namespace cpl {
             out.path = std::move(path);
             out.configJson = std::move(configJson);
             out.trailer = *trailer;
+            out.payloadSize = trailer->cfg_offset;
             return out;
         }
 

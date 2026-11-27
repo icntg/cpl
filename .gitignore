@@ -38,6 +38,13 @@ cmake-build-*/
 
 build/
 build_*/
+build-clangd/
+
+# clangd cache
+.cache/
+
+# Claude Code local settings
+.claude/
 
 .vscode/
 .idea/
